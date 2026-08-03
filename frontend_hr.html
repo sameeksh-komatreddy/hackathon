@@ -245,6 +245,25 @@ input,select{font-family:inherit;}
 .metric-foot{font-size:12.5px;color:var(--muted-fg);margin-top:8px;}
 .metric-foot b{color:var(--primary);font-weight:800;}
 
+.score-toggle{
+  display:flex;align-items:center;gap:6px;background:none;border:none;padding:0;
+  margin-top:12px;font-family:var(--font-body);font-weight:800;font-size:11px;
+  color:var(--secondary);letter-spacing:.03em;
+}
+.score-toggle:hover{color:var(--destructive);}
+.score-toggle svg{transition:transform .25s ease;flex-shrink:0;}
+.score-toggle.open svg{transform:rotate(180deg);}
+.score-breakdown{max-height:0;overflow:hidden;opacity:0;transition:max-height .28s ease, opacity .22s ease, margin-top .28s ease;}
+.score-breakdown.open{max-height:320px;opacity:1;margin-top:12px;}
+.breakdown-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:7px 0;border-bottom:1px dashed var(--border);}
+.breakdown-row:last-child{border-bottom:none;}
+.bd-left{flex:1;min-width:0;}
+.bd-label{display:block;font-family:var(--font-body);font-weight:700;font-size:11px;color:var(--muted-fg);margin-bottom:5px;}
+.breakdown-bar{height:4px;background:var(--muted);border-radius:999px;overflow:hidden;}
+.breakdown-bar-fill{height:100%;border-radius:999px;background:linear-gradient(90deg,var(--secondary),var(--destructive));}
+.breakdown-row b{flex-shrink:0;font-family:var(--font-display);font-size:14px;font-weight:700;color:var(--destructive);}
+.breakdown-empty{font-size:12px;color:var(--muted-fg);padding:4px 0 2px;}
+
 /* Section headers */
 .section-head{display:flex;align-items:baseline;justify-content:space-between;margin:34px 0 15px;}
 .section-head h2{font-family:var(--font-display);font-size:19px;font-weight:600;margin:0;display:flex;align-items:center;gap:10px;color:var(--fg);}
@@ -252,12 +271,25 @@ input,select{font-family:inherit;}
 .section-head .hint{font-family:var(--font-body);font-weight:700;font-size:10.5px;color:var(--muted-fg);letter-spacing:.05em;text-transform:uppercase;}
 
 /* Chart card */
-.chart-card{padding:22px 22px 10px;}
+.chart-card{padding:22px 22px 10px;overflow:visible;}
 .chart-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;}
 .chart-title{font-family:var(--font-display);font-weight:600;font-size:16px;color:var(--fg);}
 .chart-current{font-family:var(--font-display);font-size:22px;font-weight:700;color:var(--primary);}
 svg.chart{width:100%;height:150px;display:block;overflow:visible;}
 .chart-axis-labels{display:flex;justify-content:space-between;font-family:var(--font-body);font-weight:700;font-size:10px;color:var(--muted-fg);margin:4px 0 16px;}
+.chart-hit{fill:transparent;cursor:pointer;}
+.chart-hover-dot{opacity:0;transition:opacity .12s ease;pointer-events:none;stroke:#fff;stroke-width:2;}
+.chart-hover-dot.visible{opacity:1;}
+.chart-tooltip{
+  position:absolute;pointer-events:none;z-index:6;
+  transform:translate(-50%,-125%);
+  background:var(--fg);color:var(--bg);
+  font-family:var(--font-body);font-size:11.5px;font-weight:800;
+  padding:7px 12px;border-radius:.8rem;white-space:nowrap;
+  box-shadow:var(--shadow-lift);
+}
+.chart-tooltip span{display:block;font-weight:700;font-size:10px;letter-spacing:.03em;color:rgba(253,252,248,.6);margin-top:2px;}
+.chart-tooltip.hidden{display:none;}
 
 .insight-box{
   margin:14px 0 18px;padding:15px 16px;border-radius:1.5rem;border-top-right-radius:2.25rem;
@@ -285,7 +317,7 @@ svg.chart{width:100%;height:150px;display:block;overflow:visible;}
 .recal-btn:hover:not(:disabled){border-color:var(--primary);color:var(--primary);}
 .recal-btn:disabled{opacity:.6;cursor:default;}
 .cam-view{
-  height:250px;position:relative;
+  height:440px;position:relative;
   background:radial-gradient(ellipse at 50% 35%, var(--muted) 0%, var(--accent) 78%);
   display:flex;align-items:center;justify-content:center;overflow:hidden;
 }
@@ -416,6 +448,7 @@ input[type=range]::-webkit-slider-thumb{
   .sidebar-foot{display:none;}
   .main{padding:24px 20px 50px;}
   .grid-2,.grid-3,.rec-grid,.export-layout,.settings-grid,.live-metrics{grid-template-columns:1fr;}
+  .cam-view{height:320px;}
 }
 </style>
 </head>
@@ -531,11 +564,21 @@ input[type=range]::-webkit-slider-thumb{
             <div class="metric-head"><span class="metric-label">Average posture score</span><span class="metric-badge neutral" id="tilePostureBadge">No data</span></div>
             <div class="metric-value" id="tilePostureValue">--<span>out of 100</span></div>
             <div class="metric-foot" id="tilePostureFoot">No sessions recorded yet</div>
+            <button class="score-toggle" type="button" id="postureBreakdownToggle" aria-expanded="false">
+              <span>See score breakdown</span>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
+            <div class="score-breakdown" id="postureBreakdown"></div>
           </div>
           <div class="card r-c metric-tile">
             <div class="metric-head"><span class="metric-label">Eye strain index</span><span class="metric-badge neutral" id="tileEyeBadge">No data</span></div>
             <div class="metric-value" id="tileEyeValue">--<span>out of 10</span></div>
             <div class="metric-foot" id="tileEyeFoot">No sessions recorded yet</div>
+            <button class="score-toggle" type="button" id="eyeBreakdownToggle" aria-expanded="false">
+              <span>See score breakdown</span>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
+            <div class="score-breakdown" id="eyeBreakdown"></div>
           </div>
           <div class="card r-b metric-tile">
             <div class="metric-head"><span class="metric-label">Sessions logged</span><span class="metric-badge neutral" id="tileSessionsBadge">No data</span></div>
@@ -561,8 +604,11 @@ input[type=range]::-webkit-slider-thumb{
               </g>
               <polyline id="postureLine" points="" fill="none" stroke="#5D7052" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"/>
               <polygon id="postureFill" points="" fill="url(#gradPosture)"/>
+              <circle id="postureHoverDot" class="chart-hover-dot" cx="0" cy="0" r="6" fill="#5D7052"/>
               <circle id="postureDot" cx="0" cy="0" r="5" fill="#5D7052"/>
+              <g id="postureHitPoints"></g>
             </svg>
+            <div class="chart-tooltip hidden" id="postureTooltip"></div>
             <div class="chart-axis-labels" id="postureAxisLabels"></div>
             <div class="insight-box" id="postureInsightBox">
               <div class="tag"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4z"/></svg> Session insight</div>
@@ -588,8 +634,11 @@ input[type=range]::-webkit-slider-thumb{
               </g>
               <polyline id="eyeLine" points="" fill="none" stroke="#C18C5D" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"/>
               <polygon id="eyeFill" points="" fill="url(#gradStrain)"/>
+              <circle id="eyeHoverDot" class="chart-hover-dot" cx="0" cy="0" r="6" fill="#C18C5D"/>
               <circle id="eyeDot" cx="0" cy="0" r="5" fill="#C18C5D"/>
+              <g id="eyeHitPoints"></g>
             </svg>
+            <div class="chart-tooltip hidden" id="eyeTooltip"></div>
             <div class="chart-axis-labels" id="eyeAxisLabels"></div>
             <div class="insight-box" id="eyeInsightBox">
               <div class="tag"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4z"/></svg> Session insight</div>
@@ -1064,6 +1113,44 @@ document.getElementById('toastClose').addEventListener('click', () => toast.clas
 /* ============ HISTORY: LOAD FROM BACKEND ============ */
 function average(arr){ return arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : null; }
 
+function averageBreakdown(sessions, key, fields){
+  const rows = sessions.map(s => s[key]).filter(b => b != null);
+  const out = {};
+  fields.forEach(f => {
+    const vals = rows.map(b => b[f]).filter(v => v != null);
+    out[f] = vals.length ? average(vals) : null;
+  });
+  return out;
+}
+
+function renderBreakdown(containerId, rows){
+  const el = document.getElementById(containerId);
+  const usable = rows.filter(r => r.val != null);
+  if(usable.length === 0){
+    el.innerHTML = '<div class="breakdown-empty">Not enough data yet to break this down.</div>';
+    return;
+  }
+  el.innerHTML = usable.map(r => {
+    const pct = Math.max(0, Math.min(100, (r.val / r.max) * 100));
+    return '<div class="breakdown-row"><div class="bd-left"><span class="bd-label">' + r.label + '</span>'
+      + '<div class="breakdown-bar"><div class="breakdown-bar-fill" style="width:' + pct.toFixed(0) + '%;"></div></div>'
+      + '</div><b>-' + r.val.toFixed(1) + '</b></div>';
+  }).join('');
+}
+
+function bindBreakdownToggle(toggleId, panelId){
+  const btn = document.getElementById(toggleId);
+  const panel = document.getElementById(panelId);
+  btn.addEventListener('click', () => {
+    const open = panel.classList.toggle('open');
+    btn.classList.toggle('open', open);
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    btn.querySelector('span').textContent = open ? 'Hide score breakdown' : 'See score breakdown';
+  });
+}
+bindBreakdownToggle('postureBreakdownToggle', 'postureBreakdown');
+bindBreakdownToggle('eyeBreakdownToggle', 'eyeBreakdown');
+
 function fmtDateShort(iso){
   const d = new Date(iso);
   if(isNaN(d.getTime())) return '';
@@ -1092,7 +1179,7 @@ function setBadge(id, cls, text){
   el.textContent = text;
 }
 
-function drawTrendLine(prefix, values, maxValue){
+function drawTrendLine(prefix, values, maxValue, labels, fmtValue){
   const n = values.length;
   const line = document.getElementById(prefix+'Line');
   const fill = document.getElementById(prefix+'Fill');
@@ -1108,6 +1195,47 @@ function drawTrendLine(prefix, values, maxValue){
   const last = pts[pts.length-1];
   dot.setAttribute('cx', last[0].toFixed(1));
   dot.setAttribute('cy', last[1].toFixed(1));
+
+  const hitGroup = document.getElementById(prefix+'HitPoints');
+  const hoverDot = document.getElementById(prefix+'HoverDot');
+  const tooltip = document.getElementById(prefix+'Tooltip');
+  const card = document.getElementById(prefix+'ChartCard');
+  if(!hitGroup || !tooltip || !card) return;
+
+  hitGroup.innerHTML = '';
+  const svgNS = 'http://www.w3.org/2000/svg';
+
+  function positionTooltip(evt){
+    const rect = card.getBoundingClientRect();
+    tooltip.style.left = (evt.clientX - rect.left) + 'px';
+    tooltip.style.top = (evt.clientY - rect.top) + 'px';
+  }
+
+  pts.forEach((p, i) => {
+    const c = document.createElementNS(svgNS, 'circle');
+    c.setAttribute('cx', p[0].toFixed(1));
+    c.setAttribute('cy', p[1].toFixed(1));
+    c.setAttribute('r', 12);
+    c.setAttribute('class', 'chart-hit');
+
+    c.addEventListener('mouseenter', evt => {
+      tooltip.innerHTML = '<b>' + fmtValue(values[i]) + '</b><span>' + (labels[i]||'') + '</span>';
+      tooltip.classList.remove('hidden');
+      if(hoverDot){
+        hoverDot.setAttribute('cx', p[0].toFixed(1));
+        hoverDot.setAttribute('cy', p[1].toFixed(1));
+        hoverDot.classList.add('visible');
+      }
+      positionTooltip(evt);
+    });
+    c.addEventListener('mousemove', positionTooltip);
+    c.addEventListener('mouseleave', () => {
+      tooltip.classList.add('hidden');
+      if(hoverDot) hoverDot.classList.remove('visible');
+    });
+
+    hitGroup.appendChild(c);
+  });
 }
 
 function buildPostureInsight(trend){
@@ -1148,6 +1276,8 @@ function setEmptyHistoryState(){
   document.getElementById('postureChartBody').classList.add('hidden');
   document.getElementById('eyeChartEmpty').classList.remove('hidden');
   document.getElementById('eyeChartBody').classList.add('hidden');
+  renderBreakdown('postureBreakdown', []);
+  renderBreakdown('eyeBreakdown', []);
 }
 
 async function fetchSessions(){
@@ -1189,6 +1319,21 @@ async function loadHistory(){
   document.getElementById('tileSessionsValue').innerHTML = sessions.length + '<span>logged</span>';
   document.getElementById('tileSessionsFoot').innerHTML = 'Average length: <b>' + Math.round(avgMinutes) + ' minute' + (Math.round(avgMinutes)===1?'':'s') + '</b>';
 
+  const postureBreakdown = averageBreakdown(scored, 'posture_breakdown', ['neck','torso','pitch','roll','shrug']);
+  renderBreakdown('postureBreakdown', [
+    {label:'Neck angle',     val: postureBreakdown.neck,  max:40},
+    {label:'Torso lean',     val: postureBreakdown.torso, max:30},
+    {label:'Head pitch',     val: postureBreakdown.pitch, max:15},
+    {label:'Head roll',      val: postureBreakdown.roll,  max:15},
+    {label:'Shoulder shrug', val: postureBreakdown.shrug, max:10},
+  ]);
+
+  const eyeBreakdown = averageBreakdown(scored, 'eye_breakdown', ['blink','ear']);
+  renderBreakdown('eyeBreakdown', [
+    {label:'Low blink rate', val: eyeBreakdown.blink, max:6},
+    {label:'Eye narrowing',  val: eyeBreakdown.ear,   max:4},
+  ]);
+
   if(scored.length >= 2){
     const last = scored[scored.length-1], prev = scored[scored.length-2];
     const pDelta = Math.round(last.posture_score - prev.posture_score);
@@ -1227,8 +1372,8 @@ async function loadHistory(){
     const postureVals = trend.map(s=>s.posture_score);
     const eyeVals = trend.map(s=>s.eye_strain_index);
 
-    drawTrendLine('posture', postureVals, 100);
-    drawTrendLine('eye', eyeVals, 10);
+    drawTrendLine('posture', postureVals, 100, dates, v => Math.round(v) + ' / 100');
+    drawTrendLine('eye', eyeVals, 10, dates, v => v.toFixed(1) + ' / 10');
 
     const lastP = postureVals[postureVals.length-1], firstP = postureVals[0];
     const pDiff = Math.abs(Math.round(lastP-firstP));

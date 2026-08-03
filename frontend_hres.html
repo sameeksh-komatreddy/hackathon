@@ -245,6 +245,25 @@ input,select{font-family:inherit;}
 .metric-foot{font-size:12.5px;color:var(--muted-fg);margin-top:8px;}
 .metric-foot b{color:var(--primary);font-weight:800;}
 
+.score-toggle{
+  display:flex;align-items:center;gap:6px;background:none;border:none;padding:0;
+  margin-top:12px;font-family:var(--font-body);font-weight:800;font-size:11px;
+  color:var(--secondary);letter-spacing:.03em;
+}
+.score-toggle:hover{color:var(--destructive);}
+.score-toggle svg{transition:transform .25s ease;flex-shrink:0;}
+.score-toggle.open svg{transform:rotate(180deg);}
+.score-breakdown{max-height:0;overflow:hidden;opacity:0;transition:max-height .28s ease, opacity .22s ease, margin-top .28s ease;}
+.score-breakdown.open{max-height:320px;opacity:1;margin-top:12px;}
+.breakdown-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:7px 0;border-bottom:1px dashed var(--border);}
+.breakdown-row:last-child{border-bottom:none;}
+.bd-left{flex:1;min-width:0;}
+.bd-label{display:block;font-family:var(--font-body);font-weight:700;font-size:11px;color:var(--muted-fg);margin-bottom:5px;}
+.breakdown-bar{height:4px;background:var(--muted);border-radius:999px;overflow:hidden;}
+.breakdown-bar-fill{height:100%;border-radius:999px;background:linear-gradient(90deg,var(--secondary),var(--destructive));}
+.breakdown-row b{flex-shrink:0;font-family:var(--font-display);font-size:14px;font-weight:700;color:var(--destructive);}
+.breakdown-empty{font-size:12px;color:var(--muted-fg);padding:4px 0 2px;}
+
 /* Section headers */
 .section-head{display:flex;align-items:baseline;justify-content:space-between;margin:34px 0 15px;}
 .section-head h2{font-family:var(--font-display);font-size:19px;font-weight:600;margin:0;display:flex;align-items:center;gap:10px;color:var(--fg);}
@@ -252,12 +271,25 @@ input,select{font-family:inherit;}
 .section-head .hint{font-family:var(--font-body);font-weight:700;font-size:10.5px;color:var(--muted-fg);letter-spacing:.05em;text-transform:uppercase;}
 
 /* Chart card */
-.chart-card{padding:22px 22px 10px;}
+.chart-card{padding:22px 22px 10px;overflow:visible;}
 .chart-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;}
 .chart-title{font-family:var(--font-display);font-weight:600;font-size:16px;color:var(--fg);}
 .chart-current{font-family:var(--font-display);font-size:22px;font-weight:700;color:var(--primary);}
 svg.chart{width:100%;height:150px;display:block;overflow:visible;}
 .chart-axis-labels{display:flex;justify-content:space-between;font-family:var(--font-body);font-weight:700;font-size:10px;color:var(--muted-fg);margin:4px 0 16px;}
+.chart-hit{fill:transparent;cursor:pointer;}
+.chart-hover-dot{opacity:0;transition:opacity .12s ease;pointer-events:none;stroke:#fff;stroke-width:2;}
+.chart-hover-dot.visible{opacity:1;}
+.chart-tooltip{
+  position:absolute;pointer-events:none;z-index:6;
+  transform:translate(-50%,-125%);
+  background:var(--fg);color:var(--bg);
+  font-family:var(--font-body);font-size:11.5px;font-weight:800;
+  padding:7px 12px;border-radius:.8rem;white-space:nowrap;
+  box-shadow:var(--shadow-lift);
+}
+.chart-tooltip span{display:block;font-weight:700;font-size:10px;letter-spacing:.03em;color:rgba(253,252,248,.6);margin-top:2px;}
+.chart-tooltip.hidden{display:none;}
 
 .insight-box{
   margin:14px 0 18px;padding:15px 16px;border-radius:1.5rem;border-top-right-radius:2.25rem;
@@ -285,7 +317,7 @@ svg.chart{width:100%;height:150px;display:block;overflow:visible;}
 .recal-btn:hover:not(:disabled){border-color:var(--primary);color:var(--primary);}
 .recal-btn:disabled{opacity:.6;cursor:default;}
 .cam-view{
-  height:250px;position:relative;
+  height:440px;position:relative;
   background:radial-gradient(ellipse at 50% 35%, var(--muted) 0%, var(--accent) 78%);
   display:flex;align-items:center;justify-content:center;overflow:hidden;
 }
@@ -416,6 +448,7 @@ input[type=range]::-webkit-slider-thumb{
   .sidebar-foot{display:none;}
   .main{padding:24px 20px 50px;}
   .grid-2,.grid-3,.rec-grid,.export-layout,.settings-grid,.live-metrics{grid-template-columns:1fr;}
+  .cam-view{height:320px;}
 }
 </style>
 </head>
@@ -531,11 +564,21 @@ input[type=range]::-webkit-slider-thumb{
             <div class="metric-head"><span class="metric-label">Average posture score</span><span class="metric-badge neutral" id="tilePostureBadge">No data</span></div>
             <div class="metric-value" id="tilePostureValue">--<span>out of 100</span></div>
             <div class="metric-foot" id="tilePostureFoot">No sessions recorded yet</div>
+            <button class="score-toggle" type="button" id="postureBreakdownToggle" aria-expanded="false">
+              <span>See score breakdown</span>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
+            <div class="score-breakdown" id="postureBreakdown"></div>
           </div>
           <div class="card r-c metric-tile">
             <div class="metric-head"><span class="metric-label">Eye strain index</span><span class="metric-badge neutral" id="tileEyeBadge">No data</span></div>
             <div class="metric-value" id="tileEyeValue">--<span>out of 10</span></div>
             <div class="metric-foot" id="tileEyeFoot">No sessions recorded yet</div>
+            <button class="score-toggle" type="button" id="eyeBreakdownToggle" aria-expanded="false">
+              <span>See score breakdown</span>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
+            <div class="score-breakdown" id="eyeBreakdown"></div>
           </div>
           <div class="card r-b metric-tile">
             <div class="metric-head"><span class="metric-label">Sessions logged</span><span class="metric-badge neutral" id="tileSessionsBadge">No data</span></div>
@@ -561,8 +604,11 @@ input[type=range]::-webkit-slider-thumb{
               </g>
               <polyline id="postureLine" points="" fill="none" stroke="#5D7052" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"/>
               <polygon id="postureFill" points="" fill="url(#gradPosture)"/>
+              <circle id="postureHoverDot" class="chart-hover-dot" cx="0" cy="0" r="6" fill="#5D7052"/>
               <circle id="postureDot" cx="0" cy="0" r="5" fill="#5D7052"/>
+              <g id="postureHitPoints"></g>
             </svg>
+            <div class="chart-tooltip hidden" id="postureTooltip"></div>
             <div class="chart-axis-labels" id="postureAxisLabels"></div>
             <div class="insight-box" id="postureInsightBox">
               <div class="tag"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4z"/></svg> Session insight</div>
@@ -588,8 +634,11 @@ input[type=range]::-webkit-slider-thumb{
               </g>
               <polyline id="eyeLine" points="" fill="none" stroke="#C18C5D" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"/>
               <polygon id="eyeFill" points="" fill="url(#gradStrain)"/>
+              <circle id="eyeHoverDot" class="chart-hover-dot" cx="0" cy="0" r="6" fill="#C18C5D"/>
               <circle id="eyeDot" cx="0" cy="0" r="5" fill="#C18C5D"/>
+              <g id="eyeHitPoints"></g>
             </svg>
+            <div class="chart-tooltip hidden" id="eyeTooltip"></div>
             <div class="chart-axis-labels" id="eyeAxisLabels"></div>
             <div class="insight-box" id="eyeInsightBox">
               <div class="tag"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4z"/></svg> Session insight</div>
@@ -663,39 +712,39 @@ input[type=range]::-webkit-slider-thumb{
 
       <!-- ============ EXPORT PANEL ============ -->
       <section class="panel" id="panel-export">
-        <div class="preview-note">Sample data. The backend does not yet generate reports.</div>
+        <div class="preview-note" id="exportPreviewNote">Pulling your session history from the backend…</div>
         <div class="export-layout">
           <div>
             <div class="section-head" style="margin-top:0;"><h2>Include in report</h2></div>
             <ul class="check-list">
               <li class="check-item"><input type="checkbox" checked id="chkPosture"><div class="ci-text"><b>Posture data</b><span>Session scores, angle readings, and drift patterns</span></div></li>
-              <li class="check-item"><input type="checkbox" checked id="chkEye"><div class="ci-text"><b>Eye strain data</b><span>Blink rate, screen distance, and strain index history</span></div></li>
-              <li class="check-item"><input type="checkbox" id="chkTrend"><div class="ci-text"><b>Trend summary</b><span>Week over week changes and automated insights</span></div></li>
-              <li class="check-item"><input type="checkbox" id="chkSessions"><div class="ci-text"><b>Session log</b><span>Full list of individual sessions with duration and notes</span></div></li>
+              <li class="check-item"><input type="checkbox" checked id="chkEye"><div class="ci-text"><b>Eye strain data</b><span>Blink rate and strain index history</span></div></li>
+              <li class="check-item"><input type="checkbox" id="chkTrend"><div class="ci-text"><b>Trend summary</b><span>Session over session changes and automated insights</span></div></li>
+              <li class="check-item"><input type="checkbox" id="chkSessions"><div class="ci-text"><b>Session log</b><span>Full list of individual sessions with duration and averages</span></div></li>
             </ul>
 
             <div class="range-row">
-              <div class="field"><label>From</label><input type="date" value="2026-07-01"></div>
-              <div class="field"><label>To</label><input type="date" value="2026-08-02"></div>
+              <div class="field"><label>From</label><input type="date" id="exportFrom"></div>
+              <div class="field"><label>To</label><input type="date" id="exportTo"></div>
             </div>
 
             <button class="pdf-btn" id="pdfBtn">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 19h16"/></svg>
               Generate PDF report
             </button>
-            <p class="rec-note">Built to hand to a physical therapist or doctor: plain figures, no jargon, one page per category.</p>
+            <p class="rec-note">Built to hand to a physical therapist or doctor: plain figures, no jargon, one section per category.</p>
           </div>
 
           <div class="card r-b report-preview">
             <div class="report-sheet">
-              <div class="rs-head"><b>BackTrack Report</b><span>August 02, 2026</span></div>
-              <div class="rs-row"><span>Patient</span><b>Jordan Reyes</b></div>
-              <div class="rs-row"><span>Range</span><b>July 01 to August 02</b></div>
-              <div class="rs-row"><span>Average posture score</span><b>78 out of 100</b></div>
-              <div class="rs-row"><span>Average eye strain index</span><b>6.4 out of 10</b></div>
+              <div class="rs-head"><b>BackTrack Report</b><span id="rsDate">--</span></div>
+              <div class="rs-row"><span>Patient</span><b id="rsPatient">BackTrack User</b></div>
+              <div class="rs-row"><span>Range</span><b id="rsRange">--</b></div>
+              <div class="rs-row"><span>Average posture score</span><b id="rsPosture">-- out of 100</b></div>
+              <div class="rs-row"><span>Average eye strain index</span><b id="rsEye">-- out of 10</b></div>
               <div class="rs-block"></div>
-              <div class="rs-row"><span>Sessions included</span><b>23</b></div>
-              <div class="rs-row" style="border-bottom:none;"><span>Format</span><b>PDF, 3 pages</b></div>
+              <div class="rs-row"><span>Sessions included</span><b id="rsSessions">0</b></div>
+              <div class="rs-row" style="border-bottom:none;"><span>Format</span><b id="rsFormat">PDF</b></div>
             </div>
           </div>
         </div>
@@ -703,42 +752,83 @@ input[type=range]::-webkit-slider-thumb{
 
       <!-- ============ SETTINGS PANEL ============ -->
       <section class="panel" id="panel-settings">
-        <div class="preview-note">These controls are local to this screen. The backend currently uses fixed thresholds.</div>
+        <div class="preview-note" id="settingsStatusNote">Loading current thresholds from the backend…</div>
         <div class="settings-grid">
           <div class="card r-a settings-card">
             <h3>Posture sensitivity</h3>
-            <p class="sc-sub">Set how much forward lean or shoulder tilt triggers an alert.</p>
+            <p class="sc-sub">Set how much forward lean, tilt, or shoulder rise triggers an alert.</p>
             <div class="slider-row">
-              <div class="sr-top"><span>Neck angle threshold</span><b id="valNeck">12 degrees</b></div>
-              <input type="range" min="5" max="25" value="12" id="sliderNeck">
+              <div class="sr-top"><span>Neck angle threshold</span><b id="valNeckThresh">20 degrees</b></div>
+              <input type="range" min="5" max="60" step="1" value="20" id="sliderNeckThresh">
             </div>
             <div class="slider-row">
-              <div class="sr-top"><span>Shoulder tilt threshold</span><b id="valShoulder">8 degrees</b></div>
-              <input type="range" min="3" max="20" value="8" id="sliderShoulder">
+              <div class="sr-top"><span>Torso lean threshold</span><b id="valTorsoThresh">15 degrees</b></div>
+              <input type="range" min="5" max="60" step="1" value="15" id="sliderTorsoThresh">
+            </div>
+            <div class="slider-row">
+              <div class="sr-top"><span>Head pitch threshold</span><b id="valPitchThresh">25 degrees</b></div>
+              <input type="range" min="5" max="60" step="1" value="25" id="sliderPitchThresh">
+            </div>
+            <div class="slider-row">
+              <div class="sr-top"><span>Head roll threshold</span><b id="valRollThresh">25 degrees</b></div>
+              <input type="range" min="5" max="60" step="1" value="25" id="sliderRollThresh">
+            </div>
+            <div class="slider-row">
+              <div class="sr-top"><span>Shoulder shrug sensitivity</span><b id="valShrugRatio">90%</b></div>
+              <input type="range" min="50" max="99" step="1" value="90" id="sliderShrugRatio">
+            </div>
+            <div class="slider-row">
+              <div class="sr-top"><span>Shrug sustain before alert</span><b id="valShrugDur">10 seconds</b></div>
+              <input type="range" min="1" max="120" step="1" value="10" id="sliderShrugDur">
             </div>
             <div class="slider-row" style="margin-bottom:4px;">
-              <div class="sr-top"><span>Sustained drift before alert</span><b id="valSustain">6 seconds</b></div>
-              <input type="range" min="2" max="30" value="6" id="sliderSustain">
+              <div class="sr-top"><span>Hunching sustain before alert</span><b id="valSideDur">30 seconds</b></div>
+              <input type="range" min="1" max="180" step="1" value="30" id="sliderSideDur">
             </div>
           </div>
 
           <div class="card r-c settings-card">
             <h3>Eye strain sensitivity</h3>
-            <p class="sc-sub">Set the blink rate and screen distance that count as strain.</p>
+            <p class="sc-sub">Set the eye narrowing and blink rate that count as strain.</p>
             <div class="slider-row">
-              <div class="sr-top"><span>Minimum blink rate</span><b id="valBlink">12 per minute</b></div>
-              <input type="range" min="5" max="25" value="12" id="sliderBlink">
+              <div class="sr-top"><span>Eye narrowing threshold (EAR)</span><b id="valEarThresh">0.22</b></div>
+              <input type="range" min="5" max="40" step="1" value="22" id="sliderEarThresh">
+            </div>
+            <div class="slider-row">
+              <div class="sr-top"><span>Blink detection threshold (EAR)</span><b id="valBlinkThresh">0.18</b></div>
+              <input type="range" min="5" max="40" step="1" value="18" id="sliderBlinkThresh">
+            </div>
+            <div class="slider-row">
+              <div class="sr-top"><span>Minimum blink rate</span><b id="valLowBlinkRate">15 per minute</b></div>
+              <input type="range" min="2" max="40" step="1" value="15" id="sliderLowBlinkRate">
+            </div>
+            <div class="slider-row">
+              <div class="sr-top"><span>Blink rate calculation window</span><b id="valMinBlinkWin">10 seconds</b></div>
+              <input type="range" min="2" max="60" step="1" value="10" id="sliderMinBlinkWin">
+            </div>
+            <div class="slider-row">
+              <div class="sr-top"><span>Eye narrowing sustain before alert</span><b id="valEarDur">10 seconds</b></div>
+              <input type="range" min="1" max="120" step="1" value="10" id="sliderEarDur">
+            </div>
+            <div class="slider-row">
+              <div class="sr-top"><span>Low blink sustain before alert</span><b id="valBlinkDur">10 seconds</b></div>
+              <input type="range" min="1" max="120" step="1" value="10" id="sliderBlinkDur">
             </div>
             <div class="slider-row" style="margin-bottom:4px;">
-              <div class="sr-top"><span>Minimum screen distance</span><b id="valDist">40 centimeters</b></div>
-              <input type="range" min="20" max="80" value="40" id="sliderDist">
+              <div class="sr-top"><span>Head tilt sustain before alert</span><b id="valHeadDur">10 seconds</b></div>
+              <input type="range" min="1" max="120" step="1" value="10" id="sliderHeadDur">
             </div>
           </div>
 
           <div class="card r-b settings-card">
             <h3>Notifications</h3>
-            <p class="sc-sub">Choose how and when BackTrack interrupts you.</p>
-            <div class="select-row">
+            <p class="sc-sub">Choose how often BackTrack can repeat the same alert.</p>
+            <div class="slider-row" style="margin-bottom:4px;">
+              <div class="sr-top"><span>Notification cooldown</span><b id="valCooldown">60 seconds</b></div>
+              <input type="range" min="5" max="600" step="5" id="sliderCooldown" value="60">
+            </div>
+            <p class="sc-sub" style="margin:14px 0 0;">Reminder frequency and quiet hours below are local display preferences and aren't yet read by the backend.</p>
+            <div class="select-row" style="margin-top:10px;">
               <label>Reminder frequency</label>
               <select><option>Every 10 minutes</option><option selected>Every 20 minutes</option><option>Every 30 minutes</option><option>Only on threshold breach</option></select>
             </div>
@@ -758,7 +848,10 @@ input[type=range]::-webkit-slider-thumb{
           </div>
         </div>
 
-        <button class="save-btn" id="saveSettingsBtn">Save preferences</button>
+        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+          <button class="save-btn" id="saveSettingsBtn">Save preferences</button>
+          <button type="button" class="link-btn" id="resetSettingsBtn">Reset thresholds to defaults</button>
+        </div>
       </section>
 
     </main>
@@ -880,10 +973,14 @@ document.querySelectorAll('.recal-btn').forEach(function(btn){
 });
 
 /* ============ LOGIN / SIGNUP ============ */
+let currentUserName = 'BackTrack User';
 function enterApp(){
+  const nameVal = (document.getElementById('name').value || '').trim();
+  if(nameVal) currentUserName = nameVal;
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('app-shell').classList.remove('hidden');
   loadHistory();
+  loadSettingsFromBackend();
 }
 document.getElementById('loginForm').addEventListener('submit', function(e){
   e.preventDefault();
@@ -944,6 +1041,12 @@ document.querySelectorAll('.nav-item').forEach(btn => {
 
     if(tab === 'history'){
       loadHistory();
+    }
+    if(tab === 'export'){
+      refreshExportPreview();
+    }
+    if(tab === 'settings'){
+      loadSettingsFromBackend();
     }
   });
 });
@@ -1064,6 +1167,44 @@ document.getElementById('toastClose').addEventListener('click', () => toast.clas
 /* ============ HISTORY: LOAD FROM BACKEND ============ */
 function average(arr){ return arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : null; }
 
+function averageBreakdown(sessions, key, fields){
+  const rows = sessions.map(s => s[key]).filter(b => b != null);
+  const out = {};
+  fields.forEach(f => {
+    const vals = rows.map(b => b[f]).filter(v => v != null);
+    out[f] = vals.length ? average(vals) : null;
+  });
+  return out;
+}
+
+function renderBreakdown(containerId, rows){
+  const el = document.getElementById(containerId);
+  const usable = rows.filter(r => r.val != null);
+  if(usable.length === 0){
+    el.innerHTML = '<div class="breakdown-empty">Not enough data yet to break this down.</div>';
+    return;
+  }
+  el.innerHTML = usable.map(r => {
+    const pct = Math.max(0, Math.min(100, (r.val / r.max) * 100));
+    return '<div class="breakdown-row"><div class="bd-left"><span class="bd-label">' + r.label + '</span>'
+      + '<div class="breakdown-bar"><div class="breakdown-bar-fill" style="width:' + pct.toFixed(0) + '%;"></div></div>'
+      + '</div><b>-' + r.val.toFixed(1) + '</b></div>';
+  }).join('');
+}
+
+function bindBreakdownToggle(toggleId, panelId){
+  const btn = document.getElementById(toggleId);
+  const panel = document.getElementById(panelId);
+  btn.addEventListener('click', () => {
+    const open = panel.classList.toggle('open');
+    btn.classList.toggle('open', open);
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    btn.querySelector('span').textContent = open ? 'Hide score breakdown' : 'See score breakdown';
+  });
+}
+bindBreakdownToggle('postureBreakdownToggle', 'postureBreakdown');
+bindBreakdownToggle('eyeBreakdownToggle', 'eyeBreakdown');
+
 function fmtDateShort(iso){
   const d = new Date(iso);
   if(isNaN(d.getTime())) return '';
@@ -1092,7 +1233,7 @@ function setBadge(id, cls, text){
   el.textContent = text;
 }
 
-function drawTrendLine(prefix, values, maxValue){
+function drawTrendLine(prefix, values, maxValue, labels, fmtValue){
   const n = values.length;
   const line = document.getElementById(prefix+'Line');
   const fill = document.getElementById(prefix+'Fill');
@@ -1108,6 +1249,47 @@ function drawTrendLine(prefix, values, maxValue){
   const last = pts[pts.length-1];
   dot.setAttribute('cx', last[0].toFixed(1));
   dot.setAttribute('cy', last[1].toFixed(1));
+
+  const hitGroup = document.getElementById(prefix+'HitPoints');
+  const hoverDot = document.getElementById(prefix+'HoverDot');
+  const tooltip = document.getElementById(prefix+'Tooltip');
+  const card = document.getElementById(prefix+'ChartCard');
+  if(!hitGroup || !tooltip || !card) return;
+
+  hitGroup.innerHTML = '';
+  const svgNS = 'http://www.w3.org/2000/svg';
+
+  function positionTooltip(evt){
+    const rect = card.getBoundingClientRect();
+    tooltip.style.left = (evt.clientX - rect.left) + 'px';
+    tooltip.style.top = (evt.clientY - rect.top) + 'px';
+  }
+
+  pts.forEach((p, i) => {
+    const c = document.createElementNS(svgNS, 'circle');
+    c.setAttribute('cx', p[0].toFixed(1));
+    c.setAttribute('cy', p[1].toFixed(1));
+    c.setAttribute('r', 12);
+    c.setAttribute('class', 'chart-hit');
+
+    c.addEventListener('mouseenter', evt => {
+      tooltip.innerHTML = '<b>' + fmtValue(values[i]) + '</b><span>' + (labels[i]||'') + '</span>';
+      tooltip.classList.remove('hidden');
+      if(hoverDot){
+        hoverDot.setAttribute('cx', p[0].toFixed(1));
+        hoverDot.setAttribute('cy', p[1].toFixed(1));
+        hoverDot.classList.add('visible');
+      }
+      positionTooltip(evt);
+    });
+    c.addEventListener('mousemove', positionTooltip);
+    c.addEventListener('mouseleave', () => {
+      tooltip.classList.add('hidden');
+      if(hoverDot) hoverDot.classList.remove('visible');
+    });
+
+    hitGroup.appendChild(c);
+  });
 }
 
 function buildPostureInsight(trend){
@@ -1148,6 +1330,8 @@ function setEmptyHistoryState(){
   document.getElementById('postureChartBody').classList.add('hidden');
   document.getElementById('eyeChartEmpty').classList.remove('hidden');
   document.getElementById('eyeChartBody').classList.add('hidden');
+  renderBreakdown('postureBreakdown', []);
+  renderBreakdown('eyeBreakdown', []);
 }
 
 async function fetchSessions(){
@@ -1189,6 +1373,21 @@ async function loadHistory(){
   document.getElementById('tileSessionsValue').innerHTML = sessions.length + '<span>logged</span>';
   document.getElementById('tileSessionsFoot').innerHTML = 'Average length: <b>' + Math.round(avgMinutes) + ' minute' + (Math.round(avgMinutes)===1?'':'s') + '</b>';
 
+  const postureBreakdown = averageBreakdown(scored, 'posture_breakdown', ['neck','torso','pitch','roll','shrug']);
+  renderBreakdown('postureBreakdown', [
+    {label:'Neck angle',     val: postureBreakdown.neck,  max:40},
+    {label:'Torso lean',     val: postureBreakdown.torso, max:30},
+    {label:'Head pitch',     val: postureBreakdown.pitch, max:15},
+    {label:'Head roll',      val: postureBreakdown.roll,  max:15},
+    {label:'Shoulder shrug', val: postureBreakdown.shrug, max:10},
+  ]);
+
+  const eyeBreakdown = averageBreakdown(scored, 'eye_breakdown', ['blink','ear']);
+  renderBreakdown('eyeBreakdown', [
+    {label:'Low blink rate', val: eyeBreakdown.blink, max:6},
+    {label:'Eye narrowing',  val: eyeBreakdown.ear,   max:4},
+  ]);
+
   if(scored.length >= 2){
     const last = scored[scored.length-1], prev = scored[scored.length-2];
     const pDelta = Math.round(last.posture_score - prev.posture_score);
@@ -1227,8 +1426,8 @@ async function loadHistory(){
     const postureVals = trend.map(s=>s.posture_score);
     const eyeVals = trend.map(s=>s.eye_strain_index);
 
-    drawTrendLine('posture', postureVals, 100);
-    drawTrendLine('eye', eyeVals, 10);
+    drawTrendLine('posture', postureVals, 100, dates, v => Math.round(v) + ' / 100');
+    drawTrendLine('eye', eyeVals, 10, dates, v => v.toFixed(1) + ' / 10');
 
     const lastP = postureVals[postureVals.length-1], firstP = postureVals[0];
     const pDiff = Math.abs(Math.round(lastP-firstP));
@@ -1255,33 +1454,232 @@ async function loadHistory(){
   if(sidebarScore) sidebarScore.textContent = Math.round(scored[scored.length-1].posture_score);
 }
 
-/* ============ EXPORT: CHECKBOXES AND PDF BUTTON STATE ============ */
+/* ============ EXPORT: CHECKBOXES, DATE RANGE, LIVE PREVIEW ============ */
 const checks = ['chkPosture','chkEye','chkTrend','chkSessions'].map(id => document.getElementById(id));
 const pdfBtn = document.getElementById('pdfBtn');
+const exportFromInput = document.getElementById('exportFrom');
+const exportToInput = document.getElementById('exportTo');
+
+function fmtDateLong(iso){
+  const d = new Date(iso + 'T00:00:00');
+  if(isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString('en-US', {month:'long', day:'numeric', year:'numeric'});
+}
+
 function refreshPdfBtn(){
   const anyChecked = checks.some(c => c.checked);
   pdfBtn.disabled = !anyChecked;
 }
 checks.forEach(c => c.addEventListener('change', refreshPdfBtn));
 refreshPdfBtn();
-pdfBtn.addEventListener('click', function(){
+
+function defaultExportRange(){
+  const to = new Date();
+  const from = new Date();
+  from.setDate(from.getDate() - 30);
+  const iso = d => d.toISOString().slice(0,10);
+  if(!exportFromInput.value) exportFromInput.value = iso(from);
+  if(!exportToInput.value) exportToInput.value = iso(to);
+}
+defaultExportRange();
+
+async function refreshExportPreview(){
+  const note = document.getElementById('exportPreviewNote');
+  document.getElementById('rsPatient').textContent = currentUserName;
+  document.getElementById('rsDate').textContent = new Date().toLocaleDateString('en-US', {month:'long', day:'numeric', year:'numeric'});
+
+  let allSessions;
+  try{
+    const resp = await fetch(BACKEND_URL + '/sessions?limit=0');
+    if(!resp.ok) throw new Error('bad status');
+    const data = await resp.json();
+    allSessions = Array.isArray(data.sessions) ? data.sessions : [];
+  } catch(err){
+    note.textContent = "Couldn't reach the BackTrack backend — connect it to preview and generate reports.";
+    note.classList.remove('hidden');
+    return;
+  }
+
+  const from = exportFromInput.value, to = exportToInput.value;
+  const inRange = allSessions.filter(s => {
+    const d = (s.start_time || '').slice(0,10);
+    if(!d) return false;
+    if(from && d < from) return false;
+    if(to && d > to) return false;
+    return true;
+  });
+  const scored = inRange.filter(s => s.posture_score != null && s.eye_strain_index != null);
+
+  document.getElementById('rsRange').textContent = (from ? fmtDateLong(from) : 'earliest') + ' to ' + (to ? fmtDateLong(to) : 'latest');
+  document.getElementById('rsPosture').textContent = scored.length ? Math.round(average(scored.map(s=>s.posture_score))) + ' out of 100' : '--';
+  document.getElementById('rsEye').textContent = scored.length ? average(scored.map(s=>s.eye_strain_index)).toFixed(1) + ' out of 10' : '--';
+  document.getElementById('rsSessions').textContent = inRange.length;
+  document.getElementById('rsFormat').textContent = 'PDF';
+
+  if(inRange.length === 0){
+    note.textContent = 'No sessions fall in this date range yet — widen the range or record a session first.';
+    note.classList.remove('hidden');
+  } else {
+    note.textContent = inRange.length + ' session' + (inRange.length===1?'':'s') + ' found in this range, ready to export.';
+    note.classList.remove('hidden');
+  }
+}
+exportFromInput.addEventListener('change', refreshExportPreview);
+exportToInput.addEventListener('change', refreshExportPreview);
+
+pdfBtn.addEventListener('click', async function(){
   if(pdfBtn.disabled) return;
   const original = pdfBtn.innerHTML;
-  pdfBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg> Report generated';
-  setTimeout(() => pdfBtn.innerHTML = original, 2200);
+  pdfBtn.disabled = true;
+  pdfBtn.innerHTML = 'Generating report…';
+  try{
+    const sections = {
+      posture: document.getElementById('chkPosture').checked,
+      eye: document.getElementById('chkEye').checked,
+      trend: document.getElementById('chkTrend').checked,
+      sessions: document.getElementById('chkSessions').checked,
+    };
+    const resp = await fetch(BACKEND_URL + '/export/pdf', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        sections,
+        from: exportFromInput.value,
+        to: exportToInput.value,
+        patient_name: currentUserName,
+      }),
+    });
+    if(!resp.ok){
+      let msg = 'Failed to generate report.';
+      try{ const err = await resp.json(); if(err.error) msg = err.error; } catch(e){}
+      throw new Error(msg);
+    }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'backtrack-report.pdf';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    pdfBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg> Report downloaded';
+  } catch(err){
+    pdfBtn.innerHTML = original;
+    showToast('Export failed', err.message || "Couldn't reach the BackTrack backend.");
+  } finally {
+    setTimeout(() => { pdfBtn.innerHTML = original; refreshPdfBtn(); }, 2200);
+  }
 });
 
-/* ============ SETTINGS SLIDERS ============ */
-function bindSlider(sliderId, labelId, suffix){
-  const slider = document.getElementById(sliderId);
-  const label = document.getElementById(labelId);
-  slider.addEventListener('input', () => { label.textContent = slider.value + suffix; });
+/* ============ SETTINGS: BACKEND-BACKED THRESHOLD SLIDERS ============ */
+// Each entry maps a slider to a backend setting key. toUI/fromUI convert
+// between the raw backend value and the integer the <input type=range> can
+// hold; display formats what's shown next to the slider.
+const SETTINGS_FIELDS = [
+  { key:'neck_thresh',    slider:'sliderNeckThresh',    label:'valNeckThresh',    display:v=>Math.round(v)+' degrees' },
+  { key:'torso_thresh',   slider:'sliderTorsoThresh',   label:'valTorsoThresh',   display:v=>Math.round(v)+' degrees' },
+  { key:'pitch_thresh',   slider:'sliderPitchThresh',   label:'valPitchThresh',   display:v=>Math.round(v)+' degrees' },
+  { key:'roll_thresh',    slider:'sliderRollThresh',    label:'valRollThresh',    display:v=>Math.round(v)+' degrees' },
+  { key:'shrug_ratio',    slider:'sliderShrugRatio',    label:'valShrugRatio',
+    toUI:v=>Math.round(v*100), fromUI:v=>v/100, display:v=>Math.round(v*100)+'%' },
+  { key:'shrug_dur',      slider:'sliderShrugDur',      label:'valShrugDur',      display:v=>Math.round(v)+' seconds' },
+  { key:'side_dur',       slider:'sliderSideDur',       label:'valSideDur',       display:v=>Math.round(v)+' seconds' },
+  { key:'ear_thresh',     slider:'sliderEarThresh',     label:'valEarThresh',
+    toUI:v=>Math.round(v*100), fromUI:v=>v/100, display:v=>(v).toFixed(2) },
+  { key:'blink_thresh',   slider:'sliderBlinkThresh',   label:'valBlinkThresh',
+    toUI:v=>Math.round(v*100), fromUI:v=>v/100, display:v=>(v).toFixed(2) },
+  { key:'low_blink_rate', slider:'sliderLowBlinkRate',  label:'valLowBlinkRate',  display:v=>Math.round(v)+' per minute' },
+  { key:'min_blink_win',  slider:'sliderMinBlinkWin',   label:'valMinBlinkWin',   display:v=>Math.round(v)+' seconds' },
+  { key:'ear_dur',        slider:'sliderEarDur',        label:'valEarDur',        display:v=>Math.round(v)+' seconds' },
+  { key:'blink_dur',      slider:'sliderBlinkDur',      label:'valBlinkDur',      display:v=>Math.round(v)+' seconds' },
+  { key:'head_dur',       slider:'sliderHeadDur',       label:'valHeadDur',       display:v=>Math.round(v)+' seconds' },
+  { key:'cooldown',       slider:'sliderCooldown',      label:'valCooldown',      display:v=>Math.round(v)+' seconds' },
+];
+
+function applySettingsToUI(values){
+  SETTINGS_FIELDS.forEach(f => {
+    if(!(f.key in values)) return;
+    const raw = values[f.key];
+    const slider = document.getElementById(f.slider);
+    const label = document.getElementById(f.label);
+    const uiVal = f.toUI ? f.toUI(raw) : raw;
+    slider.value = uiVal;
+    label.textContent = f.display(raw);
+  });
 }
-bindSlider('sliderNeck','valNeck',' degrees');
-bindSlider('sliderShoulder','valShoulder',' degrees');
-bindSlider('sliderSustain','valSustain',' seconds');
-bindSlider('sliderBlink','valBlink',' per minute');
-bindSlider('sliderDist','valDist',' centimeters');
+
+// Live label updates as each slider is dragged (before saving).
+SETTINGS_FIELDS.forEach(f => {
+  const slider = document.getElementById(f.slider);
+  const label = document.getElementById(f.label);
+  slider.addEventListener('input', () => {
+    const raw = f.fromUI ? f.fromUI(Number(slider.value)) : Number(slider.value);
+    label.textContent = f.display(raw);
+  });
+});
+
+async function loadSettingsFromBackend(){
+  const note = document.getElementById('settingsStatusNote');
+  try{
+    const resp = await fetch(BACKEND_URL + '/settings');
+    if(!resp.ok) throw new Error('bad status');
+    const data = await resp.json();
+    applySettingsToUI(data.settings || {});
+    note.textContent = 'These thresholds are live — changes apply to detection as soon as you save.';
+    note.classList.remove('hidden');
+  } catch(err){
+    note.textContent = "Couldn't reach the BackTrack backend at 127.0.0.1:5050 — showing default values until it's connected.";
+    note.classList.remove('hidden');
+  }
+}
+
+document.getElementById('saveSettingsBtn').addEventListener('click', async function(){
+  const btn = this;
+  const original = btn.textContent;
+  const note = document.getElementById('settingsStatusNote');
+  const payload = {};
+  SETTINGS_FIELDS.forEach(f => {
+    const raw = Number(document.getElementById(f.slider).value);
+    payload[f.key] = f.fromUI ? f.fromUI(raw) : raw;
+  });
+  btn.textContent = 'Saving…';
+  btn.disabled = true;
+  try{
+    const resp = await fetch(BACKEND_URL + '/settings', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if(!resp.ok){
+      throw new Error(Object.keys(data.errors || {}).length ? 'Some values were out of range and were not saved.' : 'Failed to save settings.');
+    }
+    applySettingsToUI(data.settings || {});
+    btn.textContent = 'Preferences saved';
+    note.textContent = 'Saved — the backend is now using these thresholds.';
+    note.classList.remove('hidden');
+  } catch(err){
+    btn.textContent = original;
+    showToast('Settings not saved', err.message || "Couldn't reach the BackTrack backend.");
+  } finally {
+    setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 2000);
+  }
+});
+
+document.getElementById('resetSettingsBtn').addEventListener('click', async function(){
+  const note = document.getElementById('settingsStatusNote');
+  try{
+    const resp = await fetch(BACKEND_URL + '/settings/reset', { method: 'POST' });
+    if(!resp.ok) throw new Error('bad status');
+    const data = await resp.json();
+    applySettingsToUI(data.settings || {});
+    note.textContent = 'Thresholds reset to defaults and saved.';
+    note.classList.remove('hidden');
+  } catch(err){
+    showToast('Reset failed', "Couldn't reach the BackTrack backend.");
+  }
+});
 
 /* ============ THEME OPTIONS ============ */
 document.querySelectorAll('.theme-opt').forEach(opt => {
@@ -1289,13 +1687,6 @@ document.querySelectorAll('.theme-opt').forEach(opt => {
     document.querySelectorAll('.theme-opt').forEach(o => o.classList.remove('selected'));
     this.classList.add('selected');
   });
-});
-
-/* ============ SAVE SETTINGS ============ */
-document.getElementById('saveSettingsBtn').addEventListener('click', function(){
-  const original = this.textContent;
-  this.textContent = 'Preferences saved';
-  setTimeout(() => this.textContent = original, 2000);
 });
 </script>
 

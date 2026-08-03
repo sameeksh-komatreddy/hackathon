@@ -1,5 +1,18 @@
-import os, cv2, mediapipe as mp, numpy as np, math, time, json, threading, subprocess, urllib.request, uuid, datetime
+import os, cv2, mediapipe as mp, numpy as np, math, time, json, threading, subprocess, urllib.request, uuid, datetime, io
 from flask import Flask, Response, jsonify, request
+
+try:
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib import colors
+    from reportlab.lib.units import inch
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable,
+    )
+    from reportlab.lib.enums import TA_LEFT, TA_CENTER
+    REPORTLAB_OK = True
+except ImportError:
+    REPORTLAB_OK = False
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "backtrack-secret"
@@ -53,22 +66,88 @@ POSE_LINKS = (
     (24,26),(26,28),(28,30),(30,32),(28,32),
 )
 
-BLINK_THRESH  = 0.18
-EAR_THRESH    = 0.22
-MIN_BLINK_WIN = 10
-LOW_BLINK_RATE = 15
-PITCH_THRESH  = 25
-ROLL_THRESH   = 25
-SHRUG_RATIO   = 0.90
-NECK_THRESH   = 20
-TORSO_THRESH  = 15
+# ---------------- Configurable thresholds ----------------
+# Every one of these used to be a hardcoded module constant. They now live in
+# a mutable `settings` dict (protected by settings_lock) that the frontend
+# can read/update via GET/POST /settings. Each detection loop takes a
+# snapshot of this dict once per frame, so changes from the Settings screen
+# take effect on the very next frame with no restart needed.
+DEFAULT_SETTINGS = {
+    "blink_thresh":   0.18,  # EAR value below which an eye is considered "closed" (blink detection)
+    "ear_thresh":     0.22,  # EAR value below which eyes count as narrowed/strained
+    "min_blink_win":  10,    # seconds of warm-up before blink rate is trusted
+    "low_blink_rate": 15,    # blinks/min below this counts as a low blink rate
+    "pitch_thresh":   25,    # degrees of head pitch before it's flagged
+    "roll_thresh":    25,    # degrees of head roll before it's flagged
+    "shrug_ratio":    0.90,  # shoulder must rise above this fraction of its calibrated baseline height to count as a shrug
+    "neck_thresh":    20,    # degrees of forward neck angle before it's flagged (side view)
+    "torso_thresh":   15,    # degrees of torso lean before it's flagged (side view)
+    "ear_dur":        10,    # seconds eyes must stay narrowed before an eye-strain alert fires
+    "head_dur":       10,    # seconds head tilt must be sustained before an alert fires
+    "blink_dur":      10,    # seconds blink rate must stay low before an alert fires
+    "shrug_dur":      10,    # seconds shoulders must stay shrugged before an alert fires
+    "side_dur":       30,    # seconds hunching (neck/torso) must be sustained before an alert fires
+    "cooldown":       60,    # minimum seconds between repeat notifications of the same kind
+}
 
-EAR_DUR   = 10
-HEAD_DUR  = 10
-BLINK_DUR = 10
-SHRUG_DUR = 10
-SIDE_DUR  = 30
-COOLDOWN  = 60
+SETTINGS_FILE = os.path.join(MODEL_DIR, "settings.json")
+
+# (lo, hi, type) validation bounds for each setting, used by POST /settings
+SETTINGS_BOUNDS = {
+    "blink_thresh":   (0.05, 0.40, float),
+    "ear_thresh":     (0.05, 0.40, float),
+    "min_blink_win":  (2,    60,   float),
+    "low_blink_rate": (2,    40,   float),
+    "pitch_thresh":   (5,    60,   float),
+    "roll_thresh":    (5,    60,   float),
+    "shrug_ratio":    (0.50, 0.99, float),
+    "neck_thresh":    (5,    60,   float),
+    "torso_thresh":   (5,    60,   float),
+    "ear_dur":        (1,    120,  float),
+    "head_dur":       (1,    120,  float),
+    "blink_dur":      (1,    120,  float),
+    "shrug_dur":      (1,    120,  float),
+    "side_dur":       (1,    180,  float),
+    "cooldown":       (5,    600,  float),
+}
+
+settings_lock = threading.Lock()
+settings = dict(DEFAULT_SETTINGS)
+
+
+def load_settings():
+    global settings
+    try:
+        if os.path.exists(SETTINGS_FILE):
+            with open(SETTINGS_FILE) as f:
+                saved = json.load(f)
+            merged = dict(DEFAULT_SETTINGS)
+            for k in DEFAULT_SETTINGS:
+                if k in saved:
+                    merged[k] = saved[k]
+            with settings_lock:
+                settings = merged
+    except Exception as e:
+        print(f"failed to load settings: {e}")
+
+
+def save_settings_to_disk():
+    try:
+        os.makedirs(MODEL_DIR, exist_ok=True)
+        with settings_lock:
+            snap = dict(settings)
+        with open(SETTINGS_FILE, "w") as f:
+            json.dump(snap, f, indent=2)
+    except Exception as e:
+        print(f"failed to save settings: {e}")
+
+
+def get_settings_snapshot():
+    """A cheap copy of current settings — call once per frame/loop-iteration
+    rather than locking on every individual threshold read."""
+    with settings_lock:
+        return dict(settings)
+
 
 lock = threading.Lock()
 front_lock = threading.Lock()
@@ -142,48 +221,52 @@ def save_sessions():
         print(f"failed to save sessions: {e}")
 
 
-def compute_posture_score(neck_angle, torso_angle, pitch, roll, shrug_bad):
+def compute_posture_score(neck_angle, torso_angle, pitch, roll, shrug_bad, cfg):
     """0-100, 100 is perfect posture. Penalizes each signal past its threshold."""
     score = 100.0
-    if neck_angle > NECK_THRESH:
-        score -= min(40.0, (neck_angle - NECK_THRESH) * 1.5)
-    if torso_angle > TORSO_THRESH:
-        score -= min(30.0, (torso_angle - TORSO_THRESH) * 1.5)
-    if abs(pitch) > PITCH_THRESH:
-        score -= min(15.0, (abs(pitch) - PITCH_THRESH) * 0.5)
-    if abs(roll) > ROLL_THRESH:
-        score -= min(15.0, (abs(roll) - ROLL_THRESH) * 0.5)
+    if neck_angle > cfg["neck_thresh"]:
+        score -= min(40.0, (neck_angle - cfg["neck_thresh"]) * 1.5)
+    if torso_angle > cfg["torso_thresh"]:
+        score -= min(30.0, (torso_angle - cfg["torso_thresh"]) * 1.5)
+    if abs(pitch) > cfg["pitch_thresh"]:
+        score -= min(15.0, (abs(pitch) - cfg["pitch_thresh"]) * 0.5)
+    if abs(roll) > cfg["roll_thresh"]:
+        score -= min(15.0, (abs(roll) - cfg["roll_thresh"]) * 0.5)
     if shrug_bad:
         score -= 10.0
     return max(0.0, min(100.0, score))
 
 
-def compute_eye_strain(ear, blink_rate):
+def compute_eye_strain(ear, blink_rate, cfg):
     """0-10, 10 is worst strain."""
     strain = 0.0
-    if blink_rate < LOW_BLINK_RATE:
-        strain += max(0.0, LOW_BLINK_RATE - blink_rate) / LOW_BLINK_RATE * 6.0
-    if 0.0 < ear < EAR_THRESH:
-        strain += max(0.0, EAR_THRESH - ear) / EAR_THRESH * 4.0
+    low_blink_rate = cfg["low_blink_rate"]
+    ear_thresh = cfg["ear_thresh"]
+    if blink_rate < low_blink_rate:
+        strain += max(0.0, low_blink_rate - blink_rate) / low_blink_rate * 6.0
+    if 0.0 < ear < ear_thresh:
+        strain += max(0.0, ear_thresh - ear) / ear_thresh * 4.0
     return max(0.0, min(10.0, strain))
 
 
-def compute_posture_breakdown(neck_angle, torso_angle, pitch, roll, shrug_bad):
+def compute_posture_breakdown(neck_angle, torso_angle, pitch, roll, shrug_bad, cfg):
     """Per-factor point deductions that sum to (100 - posture_score)."""
     return {
-        "neck":  min(40.0, (neck_angle - NECK_THRESH) * 1.5)   if neck_angle > NECK_THRESH   else 0.0,
-        "torso": min(30.0, (torso_angle - TORSO_THRESH) * 1.5) if torso_angle > TORSO_THRESH else 0.0,
-        "pitch": min(15.0, (abs(pitch) - PITCH_THRESH) * 0.5)  if abs(pitch) > PITCH_THRESH  else 0.0,
-        "roll":  min(15.0, (abs(roll) - ROLL_THRESH) * 0.5)    if abs(roll) > ROLL_THRESH    else 0.0,
+        "neck":  min(40.0, (neck_angle - cfg["neck_thresh"]) * 1.5)   if neck_angle > cfg["neck_thresh"]   else 0.0,
+        "torso": min(30.0, (torso_angle - cfg["torso_thresh"]) * 1.5) if torso_angle > cfg["torso_thresh"] else 0.0,
+        "pitch": min(15.0, (abs(pitch) - cfg["pitch_thresh"]) * 0.5)  if abs(pitch) > cfg["pitch_thresh"]  else 0.0,
+        "roll":  min(15.0, (abs(roll) - cfg["roll_thresh"]) * 0.5)    if abs(roll) > cfg["roll_thresh"]    else 0.0,
         "shrug": 10.0 if shrug_bad else 0.0,
     }
 
 
-def compute_eye_breakdown(ear, blink_rate):
+def compute_eye_breakdown(ear, blink_rate, cfg):
     """Per-factor point contributions that sum to eye_strain_index."""
+    low_blink_rate = cfg["low_blink_rate"]
+    ear_thresh = cfg["ear_thresh"]
     return {
-        "blink": (max(0.0, LOW_BLINK_RATE - blink_rate) / LOW_BLINK_RATE * 6.0) if blink_rate < LOW_BLINK_RATE else 0.0,
-        "ear":   (max(0.0, EAR_THRESH - ear) / EAR_THRESH * 4.0) if 0.0 < ear < EAR_THRESH else 0.0,
+        "blink": (max(0.0, low_blink_rate - blink_rate) / low_blink_rate * 6.0) if blink_rate < low_blink_rate else 0.0,
+        "ear":   (max(0.0, ear_thresh - ear) / ear_thresh * 4.0) if 0.0 < ear < ear_thresh else 0.0,
     }
 
 
@@ -218,8 +301,8 @@ def get_head_pose(lm, w, h):
 def get_angle(p1, p2):
     return abs(math.degrees(math.atan2(p2[0]-p1[0], p2[1]-p1[1])))
 
-def check_notif(key, cond, now):
-    if cond and now - last_notif[key] >= COOLDOWN:
+def check_notif(key, cond, now, cooldown):
+    if cond and now - last_notif[key] >= cooldown:
         last_notif[key] = now; return True
     return False
 
@@ -280,6 +363,15 @@ def front_thread():
             ok, frame = cap.read()
             if not ok or frame is None:
                 time.sleep(0.05); continue
+
+            cfg = get_settings_snapshot()
+            BLINK_THRESH   = cfg["blink_thresh"]
+            EAR_THRESH     = cfg["ear_thresh"]
+            MIN_BLINK_WIN  = cfg["min_blink_win"]
+            LOW_BLINK_RATE = cfg["low_blink_rate"]
+            PITCH_THRESH   = cfg["pitch_thresh"]
+            ROLL_THRESH    = cfg["roll_thresh"]
+            SHRUG_RATIO    = cfg["shrug_ratio"]
 
             frame = cv2.flip(frame, 1)
             h, w = frame.shape[:2]
@@ -375,9 +467,9 @@ def front_thread():
                          (lx, ly), shrug_col, 0.5, 1)
 
             ear_col   = (0,220,100) if ear>=EAR_THRESH   else (0,200,245) if ear>=BLINK_THRESH else (30,30,255)
-            blink_col = (0,220,100) if rate>=15          else (0,200,245) if rate>=10          else (30,30,255)
-            pitch_col = (0,220,100) if abs(pitch)<=25    else (30,30,255)
-            roll_col  = (0,220,100) if abs(roll)<=25     else (30,30,255)
+            blink_col = (0,220,100) if rate>=LOW_BLINK_RATE else (0,200,245) if rate>=LOW_BLINK_RATE*0.67 else (30,30,255)
+            pitch_col = (0,220,100) if abs(pitch)<=PITCH_THRESH else (30,30,255)
+            roll_col  = (0,220,100) if abs(roll)<=ROLL_THRESH   else (30,30,255)
             y = 20
             for text, col in [
                 (f"EAR {ear:.3f}", ear_col),
@@ -419,6 +511,10 @@ def side_thread():
             ok, frame = cap.read()
             if not ok or frame is None:
                 time.sleep(0.05); continue
+
+            cfg = get_settings_snapshot()
+            NECK_THRESH  = cfg["neck_thresh"]
+            TORSO_THRESH = cfg["torso_thresh"]
 
             h, w = frame.shape[:2]
             now = time.time()
@@ -502,6 +598,13 @@ def side_thread():
 def alert_thread():
     while True:
         now = time.time()
+        cfg = get_settings_snapshot()
+        EAR_DUR   = cfg["ear_dur"]
+        HEAD_DUR  = cfg["head_dur"]
+        BLINK_DUR = cfg["blink_dur"]
+        SHRUG_DUR = cfg["shrug_dur"]
+        SIDE_DUR  = cfg["side_dur"]
+        COOLDOWN  = cfg["cooldown"]
         with lock:
             s = state
             ear_secs   = s["low_ear_secs"]
@@ -529,11 +632,11 @@ def alert_thread():
         if posture:      alerts.append("Shoulders too high — relax them.")
         if side_posture: alerts.append("Hunching detected — sit up straight.")
 
-        if check_notif("ear",   ear_secs>=EAR_DUR,     now): mac_notify("Backtrack · Eye Strain","Your eyes are narrowing."); notifs.append("low_ear")
-        if check_notif("head",  head_secs>=HEAD_DUR,   now): mac_notify("Backtrack · Head Tilt","Head tilt detected.");       notifs.append("head_tilt")
-        if check_notif("blink", blink_secs>=BLINK_DUR, now): mac_notify("Backtrack · Blink Rate","Blink more often.");        notifs.append("low_blink")
-        if check_notif("shrug", shrug_secs>=SHRUG_DUR, now): mac_notify("Backtrack · Posture","Relax your shoulders.");      notifs.append("shrug")
-        if check_notif("side",  side_secs>=SIDE_DUR,   now): mac_notify("Backtrack · Posture","Sit up straight.");           notifs.append("hunching")
+        if check_notif("ear",   ear_secs>=EAR_DUR,     now, COOLDOWN): mac_notify("Backtrack · Eye Strain","Your eyes are narrowing."); notifs.append("low_ear")
+        if check_notif("head",  head_secs>=HEAD_DUR,   now, COOLDOWN): mac_notify("Backtrack · Head Tilt","Head tilt detected.");       notifs.append("head_tilt")
+        if check_notif("blink", blink_secs>=BLINK_DUR, now, COOLDOWN): mac_notify("Backtrack · Blink Rate","Blink more often.");        notifs.append("low_blink")
+        if check_notif("shrug", shrug_secs>=SHRUG_DUR, now, COOLDOWN): mac_notify("Backtrack · Posture","Relax your shoulders.");      notifs.append("shrug")
+        if check_notif("side",  side_secs>=SIDE_DUR,   now, COOLDOWN): mac_notify("Backtrack · Posture","Sit up straight.");           notifs.append("hunching")
 
         with lock:
             state.update({"fatigue_alert":fatigue,"posture_alert":posture,
@@ -545,8 +648,8 @@ def alert_thread():
             if recording_active and current_session_accum is not None:
                 if calibrated_side:
                     shrug_bad = shrug_secs > 0
-                    p_score = compute_posture_score(neck_angle, torso_angle, pitch, roll, shrug_bad)
-                    p_breakdown = compute_posture_breakdown(neck_angle, torso_angle, pitch, roll, shrug_bad)
+                    p_score = compute_posture_score(neck_angle, torso_angle, pitch, roll, shrug_bad, cfg)
+                    p_breakdown = compute_posture_breakdown(neck_angle, torso_angle, pitch, roll, shrug_bad, cfg)
                     current_session_accum["posture_scores"].append(p_score)
                     current_session_accum["neck_angles"].append(neck_angle)
                     current_session_accum["torso_angles"].append(torso_angle)
@@ -556,8 +659,8 @@ def alert_thread():
                     current_session_accum["roll_penalties"].append(p_breakdown["roll"])
                     current_session_accum["shrug_penalties"].append(p_breakdown["shrug"])
                 if calibrated_front and face_seen:
-                    e_score = compute_eye_strain(ear, blink_rate)
-                    e_breakdown = compute_eye_breakdown(ear, blink_rate)
+                    e_score = compute_eye_strain(ear, blink_rate, cfg)
+                    e_breakdown = compute_eye_breakdown(ear, blink_rate, cfg)
                     current_session_accum["eye_strain_scores"].append(e_score)
                     current_session_accum["blink_rates"].append(blink_rate)
                     current_session_accum["blink_penalties"].append(e_breakdown["blink"])
@@ -613,6 +716,47 @@ def feed_side():
     return Response(mjpeg_gen(side_lock, lambda: side_frame),
                     mimetype="multipart/x-mixed-replace; boundary=frame",
                     headers={"Access-Control-Allow-Origin":"*"})
+
+@app.route("/settings", methods=["GET"])
+def get_settings_route():
+    return jsonify({"settings": get_settings_snapshot(), "defaults": DEFAULT_SETTINGS, "bounds": {
+        k: {"min": lo, "max": hi} for k, (lo, hi, _t) in SETTINGS_BOUNDS.items()
+    }})
+
+@app.route("/settings", methods=["POST"])
+def update_settings_route():
+    global settings
+    payload = request.get_json(force=True, silent=True) or {}
+    errors = {}
+    with settings_lock:
+        for key, (lo, hi, typ) in SETTINGS_BOUNDS.items():
+            if key not in payload:
+                continue
+            try:
+                val = typ(payload[key])
+            except (TypeError, ValueError):
+                errors[key] = "must be a number"
+                continue
+            if not (lo <= val <= hi):
+                errors[key] = f"must be between {lo} and {hi}"
+                continue
+            settings[key] = val
+        snap = dict(settings)
+
+    if errors:
+        return jsonify({"ok": False, "errors": errors, "settings": snap}), 400
+
+    save_settings_to_disk()
+    return jsonify({"ok": True, "settings": snap})
+
+@app.route("/settings/reset", methods=["POST"])
+def reset_settings_route():
+    global settings
+    with settings_lock:
+        settings = dict(DEFAULT_SETTINGS)
+        snap = dict(settings)
+    save_settings_to_disk()
+    return jsonify({"ok": True, "settings": snap})
 
 @app.route("/recalibrate",       methods=["POST"])
 def recalibrate():       recal_front.set(); recal_side.set(); return jsonify({"ok":True})
@@ -693,9 +837,254 @@ def get_sessions():
         result = sessions[-limit:] if limit else list(sessions)
     return jsonify({"sessions": result})
 
+# ---------------- PDF export ----------------
+
+def _avg(lst):
+    return round(sum(lst) / len(lst), 1) if lst else None
+
+def filter_sessions_by_range(all_sessions, date_from, date_to):
+    lo = hi = None
+    try:
+        if date_from: lo = datetime.date.fromisoformat(date_from)
+    except ValueError:
+        pass
+    try:
+        if date_to: hi = datetime.date.fromisoformat(date_to)
+    except ValueError:
+        pass
+    out = []
+    for s in all_sessions:
+        try:
+            d = datetime.datetime.fromisoformat(s["start_time"]).date()
+        except Exception:
+            continue
+        if lo and d < lo:
+            continue
+        if hi and d > hi:
+            continue
+        out.append(s)
+    return out
+
+def _posture_insight(scored):
+    vals = [s["posture_score"] for s in scored]
+    necks = [s["avg_neck_angle"] for s in scored if s.get("avg_neck_angle") is not None]
+    first, last = vals[0], vals[-1]
+    direction = "trending upward" if last > first + 2 else "trending downward" if last < first - 2 else "holding fairly steady"
+    text = f"Over these {len(vals)} sessions your posture score is {direction}, moving from {round(first)} to {round(last)}."
+    if necks:
+        text += f" Average neck angle across these sessions was {_avg(necks)} degrees."
+    return text
+
+def _eye_insight(scored):
+    vals = [s["eye_strain_index"] for s in scored]
+    blinks = [s["avg_blink_rate"] for s in scored if s.get("avg_blink_rate") is not None]
+    first, last = vals[0], vals[-1]
+    direction = "climbing" if last > first + 0.5 else "easing" if last < first - 0.5 else "holding steady"
+    text = f"Your eye strain index is {direction} across these {len(vals)} sessions, from {round(first,1)} to {round(last,1)}."
+    if blinks:
+        text += f" Average blink rate over that span was {_avg(blinks)} per minute."
+    return text
+
+def generate_pdf_report(filtered, scored, sections, date_from, date_to, patient_name):
+    if not REPORTLAB_OK:
+        raise RuntimeError("The reportlab package is required for PDF export. Install it with: pip install reportlab")
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=letter,
+        topMargin=0.75*inch, bottomMargin=0.75*inch,
+        leftMargin=0.75*inch, rightMargin=0.75*inch,
+        title="BackTrack Report",
+    )
+
+    PRIMARY = colors.HexColor("#5D7052")
+    SECONDARY = colors.HexColor("#C18C5D")
+    FG = colors.HexColor("#2C2C24")
+    MUTED_FG = colors.HexColor("#78786C")
+    BORDER = colors.HexColor("#DED8CF")
+    MUTED_BG = colors.HexColor("#F0EBE5")
+
+    styles = getSampleStyleSheet()
+    h1 = ParagraphStyle("h1", parent=styles["Title"], textColor=FG, fontSize=22, spaceAfter=2, alignment=TA_LEFT)
+    meta = ParagraphStyle("meta", parent=styles["Normal"], textColor=MUTED_FG, fontSize=9.5, spaceAfter=14)
+    h2 = ParagraphStyle("h2", parent=styles["Heading2"], textColor=PRIMARY, fontSize=14, spaceBefore=16, spaceAfter=8)
+    body = ParagraphStyle("body", parent=styles["Normal"], textColor=FG, fontSize=10, leading=15)
+    note = ParagraphStyle("note", parent=styles["Normal"], textColor=MUTED_FG, fontSize=8.5, leading=12, spaceBefore=10)
+
+    story = []
+    story.append(Paragraph("BackTrack Report", h1))
+    generated = datetime.datetime.now().strftime("%B %d, %Y")
+    range_txt = f"{date_from or 'earliest'} to {date_to or 'latest'}"
+    story.append(Paragraph(f"Prepared for {patient_name} &nbsp;·&nbsp; Generated {generated} &nbsp;·&nbsp; Range {range_txt}", meta))
+    story.append(HRFlowable(width="100%", thickness=1, color=BORDER, spaceAfter=12))
+
+    if not filtered:
+        story.append(Paragraph("No sessions were recorded in the selected date range.", body))
+        doc.build(story)
+        return buf.getvalue()
+
+    avg_posture = _avg([s["posture_score"] for s in scored]) if scored else None
+    avg_eye = _avg([s["eye_strain_index"] for s in scored]) if scored else None
+    total_minutes = round(sum(s.get("duration_seconds", 0) for s in filtered) / 60)
+
+    overview_data = [
+        ["Sessions in range", str(len(filtered))],
+        ["Average posture score", f"{avg_posture} / 100" if avg_posture is not None else "—"],
+        ["Average eye strain index", f"{avg_eye} / 10" if avg_eye is not None else "—"],
+        ["Total tracked time", f"{total_minutes} min"],
+    ]
+    t = Table(overview_data, colWidths=[2.6*inch, 3.4*inch])
+    t.setStyle(TableStyle([
+        ("FONTSIZE", (0,0), (-1,-1), 10),
+        ("TEXTCOLOR", (0,0), (0,-1), MUTED_FG),
+        ("TEXTCOLOR", (1,0), (1,-1), FG),
+        ("FONTNAME", (1,0), (1,-1), "Helvetica-Bold"),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 6),
+        ("TOPPADDING", (0,0), (-1,-1), 6),
+        ("LINEBELOW", (0,0), (-1,-2), 0.5, BORDER),
+    ]))
+    story.append(t)
+
+    def breakdown_table(title, rows):
+        story.append(Paragraph(title, h2))
+        data = [["Factor", "Avg. deduction"]] + [[label, (f"-{val}" if val is not None else "—")] for label, val in rows]
+        tbl = Table(data, colWidths=[3.6*inch, 2.4*inch])
+        tbl.setStyle(TableStyle([
+            ("FONTSIZE", (0,0), (-1,-1), 9.5),
+            ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+            ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+            ("BACKGROUND", (0,0), (-1,0), PRIMARY),
+            ("BACKGROUND", (0,1), (-1,-1), MUTED_BG),
+            ("TEXTCOLOR", (0,1), (-1,-1), FG),
+            ("TOPPADDING", (0,0), (-1,-1), 6),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 6),
+            ("LEFTPADDING", (0,0), (-1,-1), 10),
+            ("LINEBELOW", (0,0), (-1,-2), 0.5, BORDER),
+            ("BOX", (0,0), (-1,-1), 0.5, BORDER),
+        ]))
+        story.append(tbl)
+
+    if sections.get("posture") and scored:
+        avg_neck  = _avg([s["avg_neck_angle"] for s in scored if s.get("avg_neck_angle") is not None])
+        avg_torso = _avg([s["avg_torso_angle"] for s in scored if s.get("avg_torso_angle") is not None])
+        story.append(Paragraph("Posture Data", h2))
+        story.append(Paragraph(
+            f"Average neck angle was {avg_neck if avg_neck is not None else '—'} degrees and average torso "
+            f"lean was {avg_torso if avg_torso is not None else '—'} degrees across {len(scored)} scored sessions.",
+            body))
+        pb = {}
+        for f in ["neck","torso","pitch","roll","shrug"]:
+            vals = [s["posture_breakdown"][f] for s in scored if s.get("posture_breakdown") and s["posture_breakdown"].get(f) is not None]
+            pb[f] = _avg(vals)
+        breakdown_table("Score breakdown — where posture points are lost", [
+            ("Neck angle", pb.get("neck")), ("Torso lean", pb.get("torso")),
+            ("Head pitch", pb.get("pitch")), ("Head roll", pb.get("roll")),
+            ("Shoulder shrug", pb.get("shrug")),
+        ])
+
+    if sections.get("eye") and scored:
+        avg_blink = _avg([s["avg_blink_rate"] for s in scored if s.get("avg_blink_rate") is not None])
+        story.append(Paragraph("Eye Strain Data", h2))
+        story.append(Paragraph(
+            f"Average blink rate was {avg_blink if avg_blink is not None else '—'} blinks per minute "
+            f"across {len(scored)} scored sessions.", body))
+        eb = {}
+        for f in ["blink","ear"]:
+            vals = [s["eye_breakdown"][f] for s in scored if s.get("eye_breakdown") and s["eye_breakdown"].get(f) is not None]
+            eb[f] = _avg(vals)
+        breakdown_table("Score breakdown — sources of eye strain index", [
+            ("Low blink rate", eb.get("blink")), ("Eye narrowing", eb.get("ear")),
+        ])
+
+    if sections.get("trend") and len(scored) >= 2:
+        trend = scored[-14:]
+        story.append(Paragraph("Trend Summary", h2))
+        story.append(Paragraph(_posture_insight(trend), body))
+        story.append(Spacer(1, 4))
+        story.append(Paragraph(_eye_insight(trend), body))
+    elif sections.get("trend"):
+        story.append(Paragraph("Trend Summary", h2))
+        story.append(Paragraph("Not enough sessions in range yet for a trend — record at least two.", body))
+
+    if sections.get("sessions"):
+        story.append(Paragraph("Session Log", h2))
+        header = ["Date", "Duration", "Posture", "Eye strain", "Avg neck", "Avg torso", "Avg blink"]
+        rows = [header]
+        for s in filtered:
+            try:
+                d = datetime.datetime.fromisoformat(s["start_time"]).strftime("%b %d, %Y")
+            except Exception:
+                d = "—"
+            mins = round(s.get("duration_seconds", 0) / 60)
+            rows.append([
+                d, f"{mins} min",
+                f'{round(s["posture_score"])}' if s.get("posture_score") is not None else "—",
+                f'{s["eye_strain_index"]}' if s.get("eye_strain_index") is not None else "—",
+                f'{s["avg_neck_angle"]}°' if s.get("avg_neck_angle") is not None else "—",
+                f'{s["avg_torso_angle"]}°' if s.get("avg_torso_angle") is not None else "—",
+                f'{s["avg_blink_rate"]}' if s.get("avg_blink_rate") is not None else "—",
+            ])
+        tbl = Table(rows, colWidths=[0.95*inch, 0.7*inch, 0.65*inch, 0.75*inch, 0.75*inch, 0.75*inch, 0.7*inch], repeatRows=1)
+        tbl.setStyle(TableStyle([
+            ("FONTSIZE", (0,0), (-1,-1), 8.5),
+            ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+            ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+            ("BACKGROUND", (0,0), (-1,0), SECONDARY),
+            ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, MUTED_BG]),
+            ("TEXTCOLOR", (0,1), (-1,-1), FG),
+            ("ALIGN", (1,0), (-1,-1), "CENTER"),
+            ("TOPPADDING", (0,0), (-1,-1), 5),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 5),
+            ("BOX", (0,0), (-1,-1), 0.5, BORDER),
+            ("INNERGRID", (0,0), (-1,-1), 0.4, BORDER),
+        ]))
+        story.append(tbl)
+
+    story.append(Paragraph(
+        "Generated by BackTrack. Figures are derived from webcam-based pose and eye-landmark estimation and are "
+        "intended as a general wellness aid, not a medical diagnosis.", note))
+
+    doc.build(story)
+    return buf.getvalue()
+
+@app.route("/export/pdf", methods=["POST"])
+def export_pdf():
+    payload = request.get_json(force=True, silent=True) or {}
+    sections = payload.get("sections") or {}
+    date_from = payload.get("from")
+    date_to = payload.get("to")
+    patient_name = (payload.get("patient_name") or "").strip() or "BackTrack User"
+
+    if not any(sections.values()):
+        return jsonify({"ok": False, "error": "Select at least one section to include."}), 400
+
+    with sessions_lock:
+        all_sessions = list(sessions)
+
+    filtered = filter_sessions_by_range(all_sessions, date_from, date_to)
+    scored = [s for s in filtered if s.get("posture_score") is not None and s.get("eye_strain_index") is not None]
+
+    try:
+        pdf_bytes = generate_pdf_report(filtered, scored, sections, date_from, date_to, patient_name)
+    except RuntimeError as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Failed to generate report: {e}"}), 500
+
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={
+            "Content-Disposition": 'attachment; filename="backtrack-report.pdf"',
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Expose-Headers": "Content-Disposition",
+        },
+    )
+
 if __name__ == "__main__":
     ensure_model(FACE_MODEL_PATH, FACE_MODEL_URL)
     ensure_model(POSE_MODEL_PATH, POSE_MODEL_URL)
+    load_settings()
     load_sessions()
     for t in [front_thread, side_thread, alert_thread]:
         threading.Thread(target=t, daemon=True).start()

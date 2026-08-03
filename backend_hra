@@ -5,6 +5,9 @@ from flask import Flask, Response, jsonify, request
 from google import genai
 from google.genai import types
 
+from dotenv import load_dotenv
+load_dotenv()
+
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "backtrack-secret"
 

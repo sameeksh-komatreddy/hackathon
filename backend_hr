@@ -112,6 +112,13 @@ def reset_accum():
         "neck_angles": [],
         "torso_angles": [],
         "blink_rates": [],
+        "neck_penalties": [],
+        "torso_penalties": [],
+        "pitch_penalties": [],
+        "roll_penalties": [],
+        "shrug_penalties": [],
+        "blink_penalties": [],
+        "ear_penalties": [],
     }
 
 
@@ -159,6 +166,25 @@ def compute_eye_strain(ear, blink_rate):
     if 0.0 < ear < EAR_THRESH:
         strain += max(0.0, EAR_THRESH - ear) / EAR_THRESH * 4.0
     return max(0.0, min(10.0, strain))
+
+
+def compute_posture_breakdown(neck_angle, torso_angle, pitch, roll, shrug_bad):
+    """Per-factor point deductions that sum to (100 - posture_score)."""
+    return {
+        "neck":  min(40.0, (neck_angle - NECK_THRESH) * 1.5)   if neck_angle > NECK_THRESH   else 0.0,
+        "torso": min(30.0, (torso_angle - TORSO_THRESH) * 1.5) if torso_angle > TORSO_THRESH else 0.0,
+        "pitch": min(15.0, (abs(pitch) - PITCH_THRESH) * 0.5)  if abs(pitch) > PITCH_THRESH  else 0.0,
+        "roll":  min(15.0, (abs(roll) - ROLL_THRESH) * 0.5)    if abs(roll) > ROLL_THRESH    else 0.0,
+        "shrug": 10.0 if shrug_bad else 0.0,
+    }
+
+
+def compute_eye_breakdown(ear, blink_rate):
+    """Per-factor point contributions that sum to eye_strain_index."""
+    return {
+        "blink": (max(0.0, LOW_BLINK_RATE - blink_rate) / LOW_BLINK_RATE * 6.0) if blink_rate < LOW_BLINK_RATE else 0.0,
+        "ear":   (max(0.0, EAR_THRESH - ear) / EAR_THRESH * 4.0) if 0.0 < ear < EAR_THRESH else 0.0,
+    }
 
 
 def get_ear(lm, idx, w, h):
@@ -220,7 +246,11 @@ def put_text(frame, text, pos, color, scale=0.45, thick=1):
     cv2.putText(frame, text, pos, cv2.FONT_HERSHEY_SIMPLEX, scale, color,   thick, cv2.LINE_AA)
 
 def draw_face_points(frame, lm, w, h):
-    for p in lm:
+    # Sparser, finer dots read as a lighter, more refined HUD mesh
+    # instead of a dense, heavy-looking blob of landmarks.
+    for i, p in enumerate(lm):
+        if i % 2 != 0:
+            continue
         cv2.circle(frame, (int(p.x*w), int(p.y*h)), 1, (80, 220, 80), -1, cv2.LINE_AA)
 
 def draw_pose_links(frame, lm, w, h, color):
@@ -316,7 +346,7 @@ def front_thread():
                     cx, cy = pts.mean(axis=0).astype(int)
                     rx = int((pts[:,0].max() - pts[:,0].min()) / 2) + 5
                     ry = int((pts[:,1].max() - pts[:,1].min()) / 2) + 7
-                    cv2.ellipse(annotated, (cx,cy), (rx,ry), 0, 0, 360, eye_col, 2, cv2.LINE_AA)
+                    cv2.ellipse(annotated, (cx,cy), (rx,ry), 0, 0, 360, eye_col, 1, cv2.LINE_AA)
 
             if pose_result.pose_landmarks:
                 plm = pose_result.pose_landmarks[0]
@@ -516,13 +546,22 @@ def alert_thread():
                 if calibrated_side:
                     shrug_bad = shrug_secs > 0
                     p_score = compute_posture_score(neck_angle, torso_angle, pitch, roll, shrug_bad)
+                    p_breakdown = compute_posture_breakdown(neck_angle, torso_angle, pitch, roll, shrug_bad)
                     current_session_accum["posture_scores"].append(p_score)
                     current_session_accum["neck_angles"].append(neck_angle)
                     current_session_accum["torso_angles"].append(torso_angle)
+                    current_session_accum["neck_penalties"].append(p_breakdown["neck"])
+                    current_session_accum["torso_penalties"].append(p_breakdown["torso"])
+                    current_session_accum["pitch_penalties"].append(p_breakdown["pitch"])
+                    current_session_accum["roll_penalties"].append(p_breakdown["roll"])
+                    current_session_accum["shrug_penalties"].append(p_breakdown["shrug"])
                 if calibrated_front and face_seen:
                     e_score = compute_eye_strain(ear, blink_rate)
+                    e_breakdown = compute_eye_breakdown(ear, blink_rate)
                     current_session_accum["eye_strain_scores"].append(e_score)
                     current_session_accum["blink_rates"].append(blink_rate)
+                    current_session_accum["blink_penalties"].append(e_breakdown["blink"])
+                    current_session_accum["ear_penalties"].append(e_breakdown["ear"])
 
         time.sleep(0.5)
 
@@ -621,6 +660,17 @@ def session_stop():
         "avg_torso_angle": avg(accum["torso_angles"]),
         "avg_blink_rate": avg(accum["blink_rates"]),
         "sample_count": len(accum["posture_scores"]),
+        "posture_breakdown": {
+            "neck":  avg(accum["neck_penalties"]),
+            "torso": avg(accum["torso_penalties"]),
+            "pitch": avg(accum["pitch_penalties"]),
+            "roll":  avg(accum["roll_penalties"]),
+            "shrug": avg(accum["shrug_penalties"]),
+        },
+        "eye_breakdown": {
+            "blink": avg(accum["blink_penalties"]),
+            "ear":   avg(accum["ear_penalties"]),
+        },
     }
 
     with sessions_lock:

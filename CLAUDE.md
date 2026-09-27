@@ -7,3 +7,4 @@ The project is being rebuilt as a browser-only web app. For roadmap or "next ses
 - At the start of a roadmap session, outline its objectives in a few plain sentences.
 - End each reply that changes something with a short plain-language footnote of what changed.
 - Ask the user before making any key design or preference decision.
+- Keep `docs/ROADMAP.md` current: tick items when done and update it when plans change.

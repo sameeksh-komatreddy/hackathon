@@ -1,6 +1,9 @@
-import os, cv2, mediapipe as mp, numpy as np, math, time, json, threading, subprocess, urllib.request, uuid, datetime, io, hashlib, secrets, platform, shutil
+import os, re, cv2, mediapipe as mp, numpy as np, math, time, json, threading, subprocess, urllib.request, uuid, datetime, io, hashlib, secrets, platform, shutil
 from functools import wraps
 from flask import Flask, Response, jsonify, request
+
+import phone_link
+from cameras import CameraManager, PHONE, ROLES
 
 # pip install google-genai python-dotenv
 try:
@@ -77,6 +80,10 @@ POSE_MODEL_PATH = os.path.join(MODEL_DIR, "pose_landmarker_lite.task")
 POSE_MODEL_URL = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task"
 SESSIONS_FILE = os.path.join(MODEL_DIR, "sessions.json")
 USERS_FILE = os.path.join(MODEL_DIR, "users.json")
+CAMERAS_FILE = os.path.join(MODEL_DIR, "cameras.json")
+PHONE_CERT_FILE = os.path.join(MODEL_DIR, "phone-cert.pem")
+PHONE_KEY_FILE = os.path.join(MODEL_DIR, "phone-key.pem")
+PHONE_PAGE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "phone_camera.html")
 
 
 def ensure_model(path, url):
@@ -169,9 +176,11 @@ def issue_token(user_id):
    return token
 
 
-def user_id_from_request():
+def user_id_from_request(allow_query_token=False):
    auth = request.headers.get("Authorization", "")
    token = auth[7:] if auth.lower().startswith("bearer ") else auth
+   if not token and allow_query_token:
+       token = request.args.get("token", "")
    if not token:
        return None
    with tokens_lock:
@@ -182,6 +191,19 @@ def require_auth(fn):
    @wraps(fn)
    def wrapper(*args, **kwargs):
        uid = user_id_from_request()
+       if not uid:
+           return jsonify({"ok": False, "error": "Not signed in."}), 401
+       request.user_id = uid
+       return fn(*args, **kwargs)
+   return wrapper
+
+
+def require_auth_or_query_token(fn):
+   """For the camera feeds and live stream: <img> and EventSource can't send
+   an Authorization header, so they pass the token as ?token=."""
+   @wraps(fn)
+   def wrapper(*args, **kwargs):
+       uid = user_id_from_request(allow_query_token=True)
        if not uid:
            return jsonify({"ok": False, "error": "Not signed in."}), 401
        request.user_id = uid
@@ -366,7 +388,7 @@ state = {
    "neck_angle": 0.0, "torso_angle": 0.0, "bad_side_secs": 0.0,
    "fatigue_alert": False, "posture_alert": False, "side_posture_alert": False,
    "alerts": [], "notifications": [],
-   "calibrated_front": False, "calibrated_side": False,
+   "calibrated_front": False, "calibrated_side": False, "face_seen": False,
    "progress": 0.0,  # 0-1, how close the *closest* threshold is to firing
    "durations": dict(DEFAULT_SETTINGS),  # current *_dur thresholds, for per-trigger progress bars
 }
@@ -409,6 +431,8 @@ def reset_accum():
        "shrug_penalties": [],
        "blink_penalties": [],
        "ear_penalties": [],
+       "front_samples": 0,
+       "side_samples": 0,
    }
 
 
@@ -438,18 +462,12 @@ def save_sessions():
 
 
 
+# Any reading can be None when the camera that measures it isn't in use:
+# neck/torso come from the side camera, pitch/roll/shrug from the front one.
+# Unmeasured readings cost no points and are left out of the breakdown.
 def compute_posture_score(neck_angle, torso_angle, pitch, roll, shrug_bad, cfg):
-   score = 100.0
-   if neck_angle > cfg["neck_thresh"]:
-       score -= min(40.0, (neck_angle - cfg["neck_thresh"]) * 1.5)
-   if torso_angle > cfg["torso_thresh"]:
-       score -= min(30.0, (torso_angle - cfg["torso_thresh"]) * 1.5)
-   if abs(pitch) > cfg["pitch_thresh"]:
-       score -= min(15.0, (abs(pitch) - cfg["pitch_thresh"]) * 0.5)
-   if abs(roll) > cfg["roll_thresh"]:
-       score -= min(15.0, (abs(roll) - cfg["roll_thresh"]) * 0.5)
-   if shrug_bad:
-       score -= 10.0
+   breakdown = compute_posture_breakdown(neck_angle, torso_angle, pitch, roll, shrug_bad, cfg)
+   score = 100.0 - sum(v for v in breakdown.values() if v is not None)
    return max(0.0, min(100.0, score))
 
 
@@ -469,12 +487,16 @@ def compute_eye_strain(ear, blink_rate, cfg):
 
 
 def compute_posture_breakdown(neck_angle, torso_angle, pitch, roll, shrug_bad, cfg):
+   def penalty(value, thresh, rate, cap):
+       if value is None:
+           return None
+       return min(cap, (abs(value) - thresh) * rate) if abs(value) > thresh else 0.0
    return {
-       "neck":  min(40.0, (neck_angle - cfg["neck_thresh"]) * 1.5)   if neck_angle > cfg["neck_thresh"]   else 0.0,
-       "torso": min(30.0, (torso_angle - cfg["torso_thresh"]) * 1.5) if torso_angle > cfg["torso_thresh"] else 0.0,
-       "pitch": min(15.0, (abs(pitch) - cfg["pitch_thresh"]) * 0.5)  if abs(pitch) > cfg["pitch_thresh"]  else 0.0,
-       "roll":  min(15.0, (abs(roll) - cfg["roll_thresh"]) * 0.5)    if abs(roll) > cfg["roll_thresh"]    else 0.0,
-       "shrug": 10.0 if shrug_bad else 0.0,
+       "neck":  penalty(neck_angle,  cfg["neck_thresh"],  1.5, 40.0),
+       "torso": penalty(torso_angle, cfg["torso_thresh"], 1.5, 30.0),
+       "pitch": penalty(pitch,       cfg["pitch_thresh"], 0.5, 15.0),
+       "roll":  penalty(roll,        cfg["roll_thresh"],  0.5, 15.0),
+       "shrug": None if shrug_bad is None else (10.0 if shrug_bad else 0.0),
    }
 
 
@@ -602,11 +624,59 @@ def send_desktop_notification(title, msg):
 mac_notify = send_desktop_notification
 
 
-def open_cap(idx):
-   cap = cv2.VideoCapture(idx)
-   cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
-   cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-   return cap
+# ---------------- Camera sources ----------------
+# Which webcam or phone feeds the front (face) and side (posture) slots is
+# decided by the CameraManager; see cameras.py. With a single webcam it
+# becomes the front camera and the side slot waits for a phone.
+camera_manager = CameraManager(save_path=CAMERAS_FILE)
+pairing = phone_link.Pairing()
+phone_server_error = {"message": None}
+
+
+def on_phone_frame(image):
+   camera_manager.phone_frame(image)
+   return {"role": camera_manager.role_of(PHONE)}
+
+
+phone_app = phone_link.create_phone_app(pairing, on_phone_frame, PHONE_PAGE)
+
+
+def idle_message(role):
+   """What the feed shows while a slot has no live video."""
+   source = camera_manager.assignment.get(role)
+   status = camera_manager.status(role)
+   name = "front" if role == "front" else "side"
+   if status == "none":
+       return (f"No {name} camera selected", "Choose one in the Cameras card on the Record tab.")
+   if source == PHONE:
+       return ("Waiting for your phone", "Scan the QR code in the Cameras card on the Record tab.")
+   return (f"{source.replace('local:', 'Camera ')} isn't sending video",
+           "Close other apps using it, then press Rescan.")
+
+
+def placeholder_frame(lines):
+   frame = np.full((360, 640, 3), (36, 40, 44), np.uint8)
+   y = 165
+   for i, text in enumerate(lines):
+       scale = 0.75 if i == 0 else 0.5
+       tw = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, 1)[0][0]
+       cv2.putText(frame, text, ((640 - tw) // 2, y), cv2.FONT_HERSHEY_SIMPLEX,
+                   scale, (225, 225, 225) if i == 0 else (170, 170, 170), 1, cv2.LINE_AA)
+       y += 34
+   return encode_jpg(frame)
+
+
+def reset_front_state():
+   with lock:
+       state.update({"ear": 0.0, "blink_rate": 0.0, "pitch": 0.0, "roll": 0.0,
+                     "low_ear_secs": 0.0, "head_secs": 0.0, "blink_low_secs": 0.0,
+                     "shrug_secs": 0.0, "calibrated_front": False, "face_seen": False})
+
+
+def reset_side_state():
+   with lock:
+       state.update({"neck_angle": 0.0, "torso_angle": 0.0, "bad_side_secs": 0.0,
+                     "calibrated_side": False})
 
 
 def encode_jpg(frame):
@@ -642,7 +712,7 @@ def front_thread():
    base_l = base_r = None
    start = time.time()
    ts = 0
-   cap = open_cap(1)
+   last_key = source = idle = None
 
 
    with FaceLandmarker.create_from_options(face_options) as face_landmarker, \
@@ -653,9 +723,28 @@ def front_thread():
                recal_front.clear()
 
 
-           ok, frame = cap.read()
-           if not ok or frame is None:
-               time.sleep(0.05); continue
+           got = camera_manager.latest("front")
+           if got is None:
+               msg = idle_message("front")
+               if msg != idle:
+                   idle = msg
+                   ear_since = head_since = blink_since = shrug_since = None
+                   reset_front_state()
+                   with front_lock:
+                       front_frame = placeholder_frame(msg)
+               time.sleep(0.1); continue
+           idle = None
+           if (got.source, got.frame_id) == last_key:
+               time.sleep(0.005); continue
+           last_key = (got.source, got.frame_id)
+           if got.source != source:
+               # New camera: its framing differs, so start calibration over.
+               source = got.source
+               ear_since = head_since = blink_since = shrug_since = None
+               blinks = []; in_blink = False
+               base_l = base_r = None
+               start = time.time()
+           frame = got.image
 
 
            cfg = get_settings_snapshot()
@@ -817,7 +906,7 @@ def side_thread():
    global side_frame
    side_since = None
    ts = 0
-   cap = open_cap(0)
+   last_key = source = idle = None
 
 
    with PoseLandmarker.create_from_options(pose_options) as pose_landmarker:
@@ -826,9 +915,25 @@ def side_thread():
                recal_side.clear()
 
 
-           ok, frame = cap.read()
-           if not ok or frame is None:
-               time.sleep(0.05); continue
+           got = camera_manager.latest("side")
+           if got is None:
+               msg = idle_message("side")
+               if msg != idle:
+                   idle = msg
+                   side_since = None
+                   reset_side_state()
+                   with side_lock:
+                       side_frame = placeholder_frame(msg)
+               time.sleep(0.1); continue
+           idle = None
+           if (got.source, got.frame_id) == last_key:
+               time.sleep(0.005); continue
+           last_key = (got.source, got.frame_id)
+           if got.source != source:
+               source = got.source
+               side_since = None
+           # Drawn on below, so copy rather than scribble on the shared frame.
+           frame = got.image.copy()
 
 
            cfg = get_settings_snapshot()
@@ -932,106 +1037,142 @@ def side_thread():
            time.sleep(0.033)
 
 
+def alert_tick(now):
+   cfg = get_settings_snapshot()
+   EAR_DUR   = cfg["ear_dur"]
+   HEAD_DUR  = cfg["head_dur"]
+   BLINK_DUR = cfg["blink_dur"]
+   SHRUG_DUR = cfg["shrug_dur"]
+   SIDE_DUR  = cfg["side_dur"]
+   COOLDOWN  = cfg["cooldown"]
+   with lock:
+       s = state
+       ear_secs   = s["low_ear_secs"]
+       head_secs  = s["head_secs"]
+       blink_secs = s["blink_low_secs"]
+       shrug_secs = s["shrug_secs"]
+       side_secs  = s["bad_side_secs"]
+       ear        = s["ear"]
+       blink_rate = s["blink_rate"]
+       pitch      = s["pitch"]
+       roll       = s["roll"]
+       neck_angle = s["neck_angle"]
+       torso_angle= s["torso_angle"]
+       calibrated_front = s["calibrated_front"]
+       calibrated_side  = s["calibrated_side"]
+       face_seen  = s.get("face_seen", False)
+
+
+   fatigue      = (ear_secs>=EAR_DUR or head_secs>=HEAD_DUR or blink_secs>=BLINK_DUR)
+   posture      = shrug_secs >= SHRUG_DUR
+   side_posture = side_secs  >= SIDE_DUR
+
+   # Progress bar: how close is the *closest* active threshold to firing,
+   # as a 0-1 fraction. The Record screen fills this bar in real time and
+   # the desktop notification fires the instant it hits 1.0.
+   progress = max(
+       (ear_secs / EAR_DUR) if EAR_DUR else 0,
+       (head_secs / HEAD_DUR) if HEAD_DUR else 0,
+       (blink_secs / BLINK_DUR) if BLINK_DUR else 0,
+       (shrug_secs / SHRUG_DUR) if SHRUG_DUR else 0,
+       (side_secs / SIDE_DUR) if SIDE_DUR else 0,
+   )
+   progress = max(0.0, min(1.0, progress))
+
+
+   alerts = []
+   notifs = []
+   if fatigue:      alerts.append("Fatigue detected — take a break.")
+   if posture:      alerts.append("Shoulders too high — relax them.")
+   if side_posture: alerts.append("Hunching detected — sit up straight.")
+
+
+   if check_notif("ear",   ear_secs>=EAR_DUR,     now, COOLDOWN): send_desktop_notification("Backtrack · Eye Strain","Your eyes are narrowing."); notifs.append("low_ear")
+   if check_notif("head",  head_secs>=HEAD_DUR,   now, COOLDOWN): send_desktop_notification("Backtrack · Head Tilt","Head tilt detected.");       notifs.append("head_tilt")
+   if check_notif("blink", blink_secs>=BLINK_DUR, now, COOLDOWN): send_desktop_notification("Backtrack · Blink Rate","Blink more often.");        notifs.append("low_blink")
+   if check_notif("shrug", shrug_secs>=SHRUG_DUR, now, COOLDOWN): send_desktop_notification("Backtrack · Posture","Relax your shoulders.");      notifs.append("shrug")
+   if check_notif("side",  side_secs>=SIDE_DUR,   now, COOLDOWN): send_desktop_notification("Backtrack · Posture","Sit up straight.");           notifs.append("hunching")
+
+
+   with lock:
+       state.update({"fatigue_alert":fatigue,"posture_alert":posture,
+                      "side_posture_alert":side_posture,"alerts":alerts,"notifications":notifs,
+                      "progress": progress,
+                      "durations": {
+                          "ear_dur": EAR_DUR, "head_dur": HEAD_DUR, "blink_dur": BLINK_DUR,
+                          "shrug_dur": SHRUG_DUR, "side_dur": SIDE_DUR,
+                      }})
+
+
+   # Score from whichever cameras can see you right now: the front camera
+   # gives head pitch/roll (face) and shrugging (shoulders), the side camera
+   # gives neck and torso angles. Readings from a camera that isn't in use
+   # are passed as None so they neither cost nor earn points.
+   shoulders_seen = calibrated_front
+   with recording_lock:
+       accum = current_session_accum
+       if recording_active and accum is not None:
+           if face_seen or shoulders_seen or calibrated_side:
+               readings = (
+                   neck_angle  if calibrated_side else None,
+                   torso_angle if calibrated_side else None,
+                   pitch       if face_seen else None,
+                   roll        if face_seen else None,
+                   (shrug_secs > 0) if shoulders_seen else None,
+               )
+               accum["posture_scores"].append(compute_posture_score(*readings, cfg))
+               p_breakdown = compute_posture_breakdown(*readings, cfg)
+               for part in ("neck", "torso", "pitch", "roll", "shrug"):
+                   if p_breakdown[part] is not None:
+                       accum[part + "_penalties"].append(p_breakdown[part])
+               if calibrated_side:
+                   accum["neck_angles"].append(neck_angle)
+                   accum["torso_angles"].append(torso_angle)
+                   accum["side_samples"] += 1
+               if face_seen or shoulders_seen:
+                   accum["front_samples"] += 1
+           if face_seen:
+               e_score = compute_eye_strain(ear, blink_rate, cfg)
+               e_breakdown = compute_eye_breakdown(ear, blink_rate, cfg)
+               accum["eye_strain_scores"].append(e_score)
+               accum["blink_rates"].append(blink_rate)
+               accum["blink_penalties"].append(e_breakdown["blink"])
+               accum["ear_penalties"].append(e_breakdown["ear"])
+
+
 def alert_thread():
    while True:
-       now = time.time()
-       cfg = get_settings_snapshot()
-       EAR_DUR   = cfg["ear_dur"]
-       HEAD_DUR  = cfg["head_dur"]
-       BLINK_DUR = cfg["blink_dur"]
-       SHRUG_DUR = cfg["shrug_dur"]
-       SIDE_DUR  = cfg["side_dur"]
-       COOLDOWN  = cfg["cooldown"]
-       with lock:
-           s = state
-           ear_secs   = s["low_ear_secs"]
-           head_secs  = s["head_secs"]
-           blink_secs = s["blink_low_secs"]
-           shrug_secs = s["shrug_secs"]
-           side_secs  = s["bad_side_secs"]
-           ear        = s["ear"]
-           blink_rate = s["blink_rate"]
-           pitch      = s["pitch"]
-           roll       = s["roll"]
-           neck_angle = s["neck_angle"]
-           torso_angle= s["torso_angle"]
-           calibrated_front = s["calibrated_front"]
-           calibrated_side  = s["calibrated_side"]
-           face_seen  = s.get("face_seen", False)
-
-
-       fatigue      = (ear_secs>=EAR_DUR or head_secs>=HEAD_DUR or blink_secs>=BLINK_DUR)
-       posture      = shrug_secs >= SHRUG_DUR
-       side_posture = side_secs  >= SIDE_DUR
-
-       # Progress bar: how close is the *closest* active threshold to firing,
-       # as a 0-1 fraction. The Record screen fills this bar in real time and
-       # the desktop notification fires the instant it hits 1.0.
-       progress = max(
-           (ear_secs / EAR_DUR) if EAR_DUR else 0,
-           (head_secs / HEAD_DUR) if HEAD_DUR else 0,
-           (blink_secs / BLINK_DUR) if BLINK_DUR else 0,
-           (shrug_secs / SHRUG_DUR) if SHRUG_DUR else 0,
-           (side_secs / SIDE_DUR) if SIDE_DUR else 0,
-       )
-       progress = max(0.0, min(1.0, progress))
-
-
-       alerts = []
-       notifs = []
-       if fatigue:      alerts.append("Fatigue detected — take a break.")
-       if posture:      alerts.append("Shoulders too high — relax them.")
-       if side_posture: alerts.append("Hunching detected — sit up straight.")
-
-
-       if check_notif("ear",   ear_secs>=EAR_DUR,     now, COOLDOWN): send_desktop_notification("Backtrack · Eye Strain","Your eyes are narrowing."); notifs.append("low_ear")
-       if check_notif("head",  head_secs>=HEAD_DUR,   now, COOLDOWN): send_desktop_notification("Backtrack · Head Tilt","Head tilt detected.");       notifs.append("head_tilt")
-       if check_notif("blink", blink_secs>=BLINK_DUR, now, COOLDOWN): send_desktop_notification("Backtrack · Blink Rate","Blink more often.");        notifs.append("low_blink")
-       if check_notif("shrug", shrug_secs>=SHRUG_DUR, now, COOLDOWN): send_desktop_notification("Backtrack · Posture","Relax your shoulders.");      notifs.append("shrug")
-       if check_notif("side",  side_secs>=SIDE_DUR,   now, COOLDOWN): send_desktop_notification("Backtrack · Posture","Sit up straight.");           notifs.append("hunching")
-
-
-       with lock:
-           state.update({"fatigue_alert":fatigue,"posture_alert":posture,
-                          "side_posture_alert":side_posture,"alerts":alerts,"notifications":notifs,
-                          "progress": progress,
-                          "durations": {
-                              "ear_dur": EAR_DUR, "head_dur": HEAD_DUR, "blink_dur": BLINK_DUR,
-                              "shrug_dur": SHRUG_DUR, "side_dur": SIDE_DUR,
-                          }})
-
-
-       with recording_lock:
-           if recording_active and current_session_accum is not None:
-               if calibrated_side:
-                   shrug_bad = shrug_secs > 0
-                   p_score = compute_posture_score(neck_angle, torso_angle, pitch, roll, shrug_bad, cfg)
-                   p_breakdown = compute_posture_breakdown(neck_angle, torso_angle, pitch, roll, shrug_bad, cfg)
-                   current_session_accum["posture_scores"].append(p_score)
-                   current_session_accum["neck_angles"].append(neck_angle)
-                   current_session_accum["torso_angles"].append(torso_angle)
-                   current_session_accum["neck_penalties"].append(p_breakdown["neck"])
-                   current_session_accum["torso_penalties"].append(p_breakdown["torso"])
-                   current_session_accum["pitch_penalties"].append(p_breakdown["pitch"])
-                   current_session_accum["roll_penalties"].append(p_breakdown["roll"])
-                   current_session_accum["shrug_penalties"].append(p_breakdown["shrug"])
-               if calibrated_front and face_seen:
-                   e_score = compute_eye_strain(ear, blink_rate, cfg)
-                   e_breakdown = compute_eye_breakdown(ear, blink_rate, cfg)
-                   current_session_accum["eye_strain_scores"].append(e_score)
-                   current_session_accum["blink_rates"].append(blink_rate)
-                   current_session_accum["blink_penalties"].append(e_breakdown["blink"])
-                   current_session_accum["ear_penalties"].append(e_breakdown["ear"])
-
-
+       alert_tick(time.time())
        time.sleep(0.5)
+
+
+# This server only listens on 127.0.0.1, but any website open in your browser
+# can still send it requests. Two guards keep other sites out:
+#  - Host check: refuses requests addressed to any other name, which blocks
+#    "DNS rebinding" (a site pointing its own domain at 127.0.0.1).
+#  - CORS: only the BackTrack page itself (opened from a file, which browsers
+#    report as origin "null") or a page served from this computer may read
+#    responses. Camera feeds and the live stream also require your login.
+LOCAL_HOSTS = {"127.0.0.1", "localhost"}
+LOCAL_ORIGIN = re.compile(r"^https?://(127\.0\.0\.1|localhost)(:\d+)?$")
+
+
+@app.before_request
+def refuse_foreign_hosts():
+   host = (request.host or "").rsplit(":", 1)[0].lower()
+   if host not in LOCAL_HOSTS:
+       return jsonify({"ok": False, "error": "BackTrack only answers on 127.0.0.1."}), 403
 
 
 @app.after_request
 def add_cors_headers(resp):
-   resp.headers["Access-Control-Allow-Origin"] = "*"
-   resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-   resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+   origin = request.headers.get("Origin")
+   if origin and (origin == "null" or LOCAL_ORIGIN.match(origin)):
+       resp.headers["Access-Control-Allow-Origin"] = origin
+       resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+       resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+       resp.headers["Access-Control-Expose-Headers"] = "Content-Disposition"
+   resp.headers["Vary"] = "Origin"
    return resp
 
 
@@ -1041,6 +1182,7 @@ def index():
 
 
 @app.route("/stream")
+@require_auth_or_query_token
 def stream():
    def gen():
        while True:
@@ -1056,8 +1198,7 @@ def stream():
            yield f"data: {json.dumps(payload)}\n\n"
            time.sleep(0.1)
    return Response(gen(), mimetype="text/event-stream",
-                   headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no",
-                            "Access-Control-Allow-Origin":"*"})
+                   headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no"})
 
 
 def mjpeg_gen(lk, get_frame):
@@ -1070,17 +1211,17 @@ def mjpeg_gen(lk, get_frame):
 
 
 @app.route("/feed/front")
+@require_auth_or_query_token
 def feed_front():
    return Response(mjpeg_gen(front_lock, lambda: front_frame),
-                   mimetype="multipart/x-mixed-replace; boundary=frame",
-                   headers={"Access-Control-Allow-Origin":"*"})
+                   mimetype="multipart/x-mixed-replace; boundary=frame")
 
 
 @app.route("/feed/side")
+@require_auth_or_query_token
 def feed_side():
    return Response(mjpeg_gen(side_lock, lambda: side_frame),
-                   mimetype="multipart/x-mixed-replace; boundary=frame",
-                   headers={"Access-Control-Allow-Origin":"*"})
+                   mimetype="multipart/x-mixed-replace; boundary=frame")
 
 
 @app.route("/settings", methods=["GET"])
@@ -1140,11 +1281,81 @@ def notify_test():
 
 
 @app.route("/recalibrate",       methods=["POST"])
+@require_auth
 def recalibrate():       recal_front.set(); recal_side.set(); return jsonify({"ok":True})
 @app.route("/recalibrate_front", methods=["POST"])
+@require_auth
 def recalibrate_front(): recal_front.set();                   return jsonify({"ok":True})
 @app.route("/recalibrate_side",  methods=["POST"])
+@require_auth
 def recalibrate_side():  recal_side.set();                    return jsonify({"ok":True})
+
+
+# ---------------- Camera slots and phone link ----------------
+
+
+@app.route("/cameras", methods=["GET"])
+@require_auth
+def get_cameras():
+   return jsonify(camera_manager.describe())
+
+
+@app.route("/cameras", methods=["POST"])
+@require_auth
+def set_cameras():
+   payload = request.get_json(force=True, silent=True) or {}
+   try:
+       for role in ROLES:
+           if role in payload:
+               camera_manager.assign(role, payload[role])
+   except ValueError as e:
+       return jsonify({"ok": False, "error": str(e), **camera_manager.describe()}), 400
+   return jsonify(camera_manager.describe())
+
+
+@app.route("/cameras/swap", methods=["POST"])
+@require_auth
+def swap_cameras():
+   camera_manager.swap()
+   return jsonify(camera_manager.describe())
+
+
+@app.route("/cameras/rescan", methods=["POST"])
+@require_auth
+def rescan_cameras():
+   camera_manager.rescan()
+   return jsonify(camera_manager.describe())
+
+
+def phone_link_info():
+   addresses = phone_link.lan_addresses()
+   code = pairing.code
+   urls = [phone_link.phone_url(a, code) for a in addresses]
+   info = {
+       "url": urls[0] if urls else None,
+       "alternates": urls[1:],
+       "qr_svg": phone_link.qr_svg(urls[0]) if urls else None,
+       "connected": camera_manager.phone_connected(),
+       "role": camera_manager.role_of(PHONE),
+       "error": phone_server_error["message"],
+   }
+   if not urls and not info["error"]:
+       info["error"] = ("This computer isn't connected to a network. Connect it to the same "
+                        "Wi-Fi as your phone (or to your phone's hotspot) and reopen this tab.")
+   return info
+
+
+@app.route("/phone/link", methods=["GET"])
+@require_auth
+def get_phone_link():
+   return jsonify(phone_link_info())
+
+
+@app.route("/phone/link/new", methods=["POST"])
+@require_auth
+def new_phone_link():
+   pairing.rotate()
+   return jsonify(phone_link_info())
 
 
 # ---------------- Session endpoints (per user) ----------------
@@ -1210,6 +1421,10 @@ def session_stop():
            "blink": avg(accum["blink_penalties"]),
            "ear":   avg(accum["ear_penalties"]),
        },
+       "cameras_used": {
+           "front": accum["front_samples"] > 0,
+           "side":  accum["side_samples"] > 0,
+       },
    }
 
 
@@ -1257,8 +1472,10 @@ def summarize_sessions_for_prompt(user_id, limit=30):
        return "No sessions have been recorded yet."
    lines = []
    for s in recent:
+       used = s.get("cameras_used")
+       cams = ("+".join(r for r in ROLES if used.get(r)) or "none") if used else "unknown"
        lines.append(
-           f"- end_time={s.get('end_time','?')}, duration_sec={s.get('duration_seconds',0)}, "
+           f"- end_time={s.get('end_time','?')}, cameras_used={cams}, duration_sec={s.get('duration_seconds',0)}, "
            f"posture_score={s.get('posture_score')}, eye_strain_index={s.get('eye_strain_index')}, "
            f"avg_neck_angle={s.get('avg_neck_angle')}, avg_torso_angle={s.get('avg_torso_angle')}, "
            f"avg_blink_rate={s.get('avg_blink_rate')}, "
@@ -1313,6 +1530,10 @@ A user has recorded the following tracking sessions (most recent last):
 {history_text}
 
 {focus}
+
+cameras_used says which cameras were tracking: "front" faces the user (head pitch/roll, shoulder shrug,
+eyes) and "side" watches from the side (neck and torso angle). A value of None means that part wasn't
+measured in that session — treat it as missing data, not as good posture.
 
 Write a short personalized report as a JSON object with exactly these keys:
 - "risk_level": one of "good", "moderate", "risky", based on the recent data.
@@ -1445,7 +1666,10 @@ def _eye_insight(scored):
    return text
 
 
-def generate_pdf_report(filtered, scored, sections, date_from, date_to, patient_name):
+def generate_pdf_report(filtered, posture_scored, eye_scored, sections, date_from, date_to, patient_name):
+   # posture_scored / eye_scored are the sessions that have that score. They
+   # differ when only one camera was used (e.g. no side camera still gives a
+   # posture score, but no front camera means no eye strain score).
    if not REPORTLAB_OK:
        raise RuntimeError("The reportlab package is required for PDF export. Install it with: pip install reportlab")
 
@@ -1489,8 +1713,8 @@ def generate_pdf_report(filtered, scored, sections, date_from, date_to, patient_
        return buf.getvalue()
 
 
-   avg_posture = _avg([s["posture_score"] for s in scored]) if scored else None
-   avg_eye = _avg([s["eye_strain_index"] for s in scored]) if scored else None
+   avg_posture = _avg([s["posture_score"] for s in posture_scored]) if posture_scored else None
+   avg_eye = _avg([s["eye_strain_index"] for s in eye_scored]) if eye_scored else None
    total_minutes = round(sum(s.get("duration_seconds", 0) for s in filtered) / 60)
 
 
@@ -1533,17 +1757,17 @@ def generate_pdf_report(filtered, scored, sections, date_from, date_to, patient_
        story.append(tbl)
 
 
-   if sections.get("posture") and scored:
-       avg_neck  = _avg([s["avg_neck_angle"] for s in scored if s.get("avg_neck_angle") is not None])
-       avg_torso = _avg([s["avg_torso_angle"] for s in scored if s.get("avg_torso_angle") is not None])
+   if sections.get("posture") and posture_scored:
+       avg_neck  = _avg([s["avg_neck_angle"] for s in posture_scored if s.get("avg_neck_angle") is not None])
+       avg_torso = _avg([s["avg_torso_angle"] for s in posture_scored if s.get("avg_torso_angle") is not None])
        story.append(Paragraph("Posture Data", h2))
        story.append(Paragraph(
            f"Average neck angle was {avg_neck if avg_neck is not None else '—'} degrees and average torso "
-           f"lean was {avg_torso if avg_torso is not None else '—'} degrees across {len(scored)} scored sessions.",
+           f"lean was {avg_torso if avg_torso is not None else '—'} degrees across {len(posture_scored)} scored sessions.",
            body))
        pb = {}
        for f in ["neck","torso","pitch","roll","shrug"]:
-           vals = [s["posture_breakdown"][f] for s in scored if s.get("posture_breakdown") and s["posture_breakdown"].get(f) is not None]
+           vals = [s["posture_breakdown"][f] for s in posture_scored if s.get("posture_breakdown") and s["posture_breakdown"].get(f) is not None]
            pb[f] = _avg(vals)
        breakdown_table("Score breakdown — where posture points are lost", [
            ("Neck angle", pb.get("neck")), ("Torso lean", pb.get("torso")),
@@ -1552,30 +1776,34 @@ def generate_pdf_report(filtered, scored, sections, date_from, date_to, patient_
        ])
 
 
-   if sections.get("eye") and scored:
-       avg_blink = _avg([s["avg_blink_rate"] for s in scored if s.get("avg_blink_rate") is not None])
+   if sections.get("eye") and eye_scored:
+       avg_blink = _avg([s["avg_blink_rate"] for s in eye_scored if s.get("avg_blink_rate") is not None])
        story.append(Paragraph("Eye Strain Data", h2))
        story.append(Paragraph(
            f"Average blink rate was {avg_blink if avg_blink is not None else '—'} blinks per minute "
-           f"across {len(scored)} scored sessions.", body))
+           f"across {len(eye_scored)} scored sessions.", body))
        eb = {}
        for f in ["blink","ear"]:
-           vals = [s["eye_breakdown"][f] for s in scored if s.get("eye_breakdown") and s["eye_breakdown"].get(f) is not None]
+           vals = [s["eye_breakdown"][f] for s in eye_scored if s.get("eye_breakdown") and s["eye_breakdown"].get(f) is not None]
            eb[f] = _avg(vals)
        breakdown_table("Score breakdown — sources of eye strain index", [
            ("Low blink rate", eb.get("blink")), ("Eye narrowing", eb.get("ear")),
        ])
 
 
-   if sections.get("trend") and len(scored) >= 2:
-       trend = scored[-14:]
+   if sections.get("trend"):
        story.append(Paragraph("Trend Summary", h2))
-       story.append(Paragraph(_posture_insight(trend), body))
-       story.append(Spacer(1, 4))
-       story.append(Paragraph(_eye_insight(trend), body))
-   elif sections.get("trend"):
-       story.append(Paragraph("Trend Summary", h2))
-       story.append(Paragraph("Not enough sessions in range yet for a trend — record at least two.", body))
+       trends = []
+       if len(posture_scored) >= 2:
+           trends.append(_posture_insight(posture_scored[-14:]))
+       if len(eye_scored) >= 2:
+           trends.append(_eye_insight(eye_scored[-14:]))
+       if not trends:
+           trends.append("Not enough sessions in range yet for a trend — record at least two.")
+       for i, text in enumerate(trends):
+           if i:
+               story.append(Spacer(1, 4))
+           story.append(Paragraph(text, body))
 
 
    if sections.get("sessions"):
@@ -1642,11 +1870,12 @@ def export_pdf():
 
 
    filtered = filter_sessions_by_range(all_sessions, date_from, date_to)
-   scored = [s for s in filtered if s.get("posture_score") is not None and s.get("eye_strain_index") is not None]
+   posture_scored = [s for s in filtered if s.get("posture_score") is not None]
+   eye_scored = [s for s in filtered if s.get("eye_strain_index") is not None]
 
 
    try:
-       pdf_bytes = generate_pdf_report(filtered, scored, sections, date_from, date_to, patient_name)
+       pdf_bytes = generate_pdf_report(filtered, posture_scored, eye_scored, sections, date_from, date_to, patient_name)
    except RuntimeError as e:
        return jsonify({"ok": False, "error": str(e)}), 500
    except Exception as e:
@@ -1658,8 +1887,6 @@ def export_pdf():
        mimetype="application/pdf",
        headers={
            "Content-Disposition": 'attachment; filename="backtrack-report.pdf"',
-           "Access-Control-Allow-Origin": "*",
-           "Access-Control-Expose-Headers": "Content-Disposition",
        },
    )
 
@@ -1669,9 +1896,27 @@ if __name__ == "__main__":
    ensure_model(POSE_MODEL_PATH, POSE_MODEL_URL)
    load_users()
    load_sessions()
+
+   print("Looking for webcams…")
+   camera_manager.start()
+   webcams = ", ".join(f"Camera {i}" for i in camera_manager.available) or "none found"
+   print(f"  webcams: {webcams}")
+   for role in ROLES:
+       src = camera_manager.assignment[role] or "nothing"
+       print(f"  {role:5} camera → {src.replace('local:', 'Camera ')}")
+
+   addresses = phone_link.lan_addresses()
+   try:
+       cert, key = phone_link.ensure_certificate(PHONE_CERT_FILE, PHONE_KEY_FILE, hosts=addresses)
+       phone_link.start_phone_server(phone_app, cert, key)
+       where = addresses[0] if addresses else "<this computer's Wi-Fi address>"
+       print(f"Phone camera link  →  https://{where}:{phone_link.PHONE_PORT}  (scan the QR code on the Record tab)")
+   except OSError as e:
+       phone_server_error["message"] = (f"The phone link couldn't start on port {phone_link.PHONE_PORT} ({e}). "
+                                        "Close whatever is using that port and restart BackTrack.")
+       print(f"[BackTrack] {phone_server_error['message']}")
+
    for t in [front_thread, side_thread, alert_thread]:
        threading.Thread(target=t, daemon=True).start()
    print("Backtrack backend  →  http://127.0.0.1:5050")
-   print("  cam 0  iPhone/continuity  →  /feed/side")
-   print("  cam 1  MacBook            →  /feed/front")
    app.run(host="127.0.0.1", port=5050, threaded=True)

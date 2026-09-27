@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#5D7052">
+<title>BackTrack Phone Camera</title>
+<link rel="icon" href="data:,">
+<style>
+:root{
+  --bg:#FDFCF8;
+  --card-bg:#FEFEFA;
+  --fg:#2C2C24;
+  --primary:#5D7052;
+  --primary-fg:#F3F4F1;
+  --secondary:#C18C5D;
+  --accent:#E6DCCD;
+  --accent-fg:#4A4A40;
+  --muted:#F0EBE5;
+  --muted-fg:#78786C;
+  --border:#DED8CF;
+  --destructive:#A85448;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--bg);color:var(--fg);
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  min-height:100vh;padding:max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+}
+main{max-width:560px;margin:0 auto;}
+header{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
+.logo{width:34px;height:34px;border-radius:50%;background:var(--primary);display:flex;align-items:center;justify-content:center;}
+h1{font-family:Georgia,"Times New Roman",serif;font-size:21px;margin:0;}
+h1 span{display:block;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:12px;font-weight:700;color:var(--muted-fg);letter-spacing:.04em;text-transform:uppercase;margin-top:2px;}
+
+.status{
+  display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:14px;margin-bottom:14px;
+  background:var(--muted);border:1px solid var(--border);font-size:14px;font-weight:600;line-height:1.4;
+}
+.status .dot{flex-shrink:0;width:10px;height:10px;border-radius:50%;background:var(--muted-fg);}
+.status.live{background:rgba(93,112,82,.1);border-color:rgba(93,112,82,.35);color:var(--primary);}
+.status.live .dot{background:var(--primary);animation:pulse 1.6s infinite;}
+.status.error{background:rgba(168,84,72,.1);border-color:rgba(168,84,72,.35);color:var(--destructive);}
+.status.error .dot{background:var(--destructive);}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
+
+.viewer{
+  position:relative;width:100%;aspect-ratio:4/3;border-radius:18px;overflow:hidden;
+  background:#24282c;display:flex;align-items:center;justify-content:center;
+}
+.viewer video{width:100%;height:100%;object-fit:contain;display:block;}
+.viewer video.mirror{transform:scaleX(-1);}
+.viewer .empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;
+  padding:20px;color:#d8d8d0;font-size:14px;line-height:1.5;}
+.stats{font-size:12px;color:var(--muted-fg);margin:8px 2px 0;min-height:16px;}
+
+.controls{display:flex;gap:10px;margin-top:14px;}
+button{
+  font:inherit;font-weight:700;font-size:15px;border-radius:999px;padding:14px 18px;cursor:pointer;
+  border:1.5px solid var(--border);background:var(--card-bg);color:var(--fg);
+}
+button.primary{flex:1;background:var(--primary);border-color:var(--primary);color:var(--primary-fg);}
+button.primary.stop{background:var(--destructive);border-color:var(--destructive);}
+button:disabled{opacity:.55;cursor:default;}
+
+.tips{margin-top:18px;padding:14px 16px;border-radius:16px;background:var(--accent);color:var(--accent-fg);font-size:13.5px;line-height:1.55;}
+.tips b{color:var(--fg);}
+.tips ul{margin:6px 0 0;padding-left:18px;}
+.tips li{margin-bottom:4px;}
+.code-entry{display:none;margin-top:14px;}
+.code-entry.show{display:block;}
+.code-entry p{font-size:13.5px;line-height:1.5;margin:0 0 8px;}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="logo" aria-hidden="true">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F3F4F1" stroke-width="2"><rect x="2" y="6" width="14" height="12" rx="2"/><path d="M16 10l6-4v12l-6-4"/></svg>
+    </div>
+    <h1>BackTrack<span>Phone camera</span></h1>
+  </header>
+
+  <div class="status" id="status" role="status" aria-live="polite"><span class="dot"></span><span id="statusText">Ready. Tap Start camera.</span></div>
+
+  <div class="viewer">
+    <video id="video" playsinline muted autoplay></video>
+    <div class="empty" id="empty">Your camera preview will appear here.</div>
+  </div>
+  <div class="stats" id="stats"></div>
+
+  <div class="controls">
+    <button class="primary" id="startBtn" type="button">Start camera</button>
+    <button id="flipBtn" type="button" disabled>Flip</button>
+  </div>
+
+  <div class="code-entry" id="codeEntry">
+    <p>This page needs the pairing code from your computer. Scan the QR code on BackTrack's Record tab again, or open the full address shown under it.</p>
+  </div>
+
+  <div class="tips">
+    <b>Setting up</b>
+    <ul>
+      <li>For the <b>side camera</b>, stand the phone about 1–2 m to your side at shoulder height, turned sideways (landscape), so your ear, shoulder and hip are all in view.</li>
+      <li>Keep this page open and the phone plugged in. The screen stays on while the camera is running.</li>
+      <li>Nothing is recorded on the phone. Frames go straight to BackTrack on your computer over your Wi-Fi.</li>
+    </ul>
+  </div>
+</main>
+
+<script>
+const FPS = 15;
+const MAX_WIDTH = 640;
+const JPEG_QUALITY = 0.7;
+
+const code = new URLSearchParams(location.search).get('code') || '';
+const video = document.getElementById('video');
+const empty = document.getElementById('empty');
+const startBtn = document.getElementById('startBtn');
+const flipBtn = document.getElementById('flipBtn');
+const statusEl = document.getElementById('status');
+const statusText = document.getElementById('statusText');
+const statsEl = document.getElementById('stats');
+const canvas = document.createElement('canvas');
+const ctx = canvas.getContext('2d');
+
+let stream = null;
+let running = false;
+let facing = 'environment';
+let wakeLock = null;
+let sent = 0, windowStart = performance.now();
+
+function setStatus(text, kind){
+  statusText.textContent = text;
+  statusEl.className = 'status' + (kind ? ' ' + kind : '');
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function roleText(role){
+  if(role === 'side') return 'Streaming as the side camera (posture).';
+  if(role === 'front') return 'Streaming as the front camera (face and eyes).';
+  return 'Connected, but not in use yet. On your computer, pick "Phone" for a camera slot.';
+}
+
+async function keepAwake(){
+  try{
+    if('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen');
+  } catch(e){ /* not supported or refused; streaming still works */ }
+}
+
+async function openCamera(){
+  if(stream) stream.getTracks().forEach(t => t.stop());
+  stream = await navigator.mediaDevices.getUserMedia({
+    audio: false,
+    video: { facingMode: { ideal: facing }, width: { ideal: 1280 }, height: { ideal: 720 } },
+  });
+  video.srcObject = stream;
+  video.classList.toggle('mirror', facing === 'user');
+  empty.style.display = 'none';
+  await video.play().catch(() => {});
+}
+
+async function sendFrame(){
+  if(!video.videoWidth) return true;
+  const scale = Math.min(1, MAX_WIDTH / video.videoWidth);
+  canvas.width = Math.round(video.videoWidth * scale);
+  canvas.height = Math.round(video.videoHeight * scale);
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', JPEG_QUALITY));
+  if(!blob) return true;
+
+  let resp, data = {};
+  try{
+    resp = await fetch('/frame', {
+      method: 'POST',
+      headers: { 'X-Pair-Code': code, 'Content-Type': 'image/jpeg' },
+      body: blob,
+      cache: 'no-store',
+    });
+    data = await resp.json().catch(() => ({}));
+  } catch(e){
+    setStatus("Can't reach your computer. Check that both are on the same Wi-Fi and BackTrack is still running. Retrying…", 'error');
+    await sleep(1000);
+    return true;
+  }
+  if(resp.status === 403){
+    setStatus(data.error || 'This link has expired. Scan the QR code on your computer again.', 'error');
+    return false;
+  }
+  if(resp.ok){
+    setStatus(roleText(data.role), data.role ? 'live' : '');
+    sent++;
+  }
+  return true;
+}
+
+async function pump(){
+  while(running){
+    const t0 = performance.now();
+    const keepGoing = await sendFrame();
+    if(!keepGoing){ stop(); return; }
+    const now = performance.now();
+    if(now - windowStart >= 2000){
+      statsEl.textContent = `${Math.round(sent * 1000 / (now - windowStart))} frames/s · ${canvas.width}×${canvas.height}`;
+      sent = 0; windowStart = now;
+    }
+    const wait = 1000 / FPS - (performance.now() - t0);
+    if(wait > 0) await sleep(wait);
+  }
+}
+
+async function start(){
+  if(!code){
+    document.getElementById('codeEntry').classList.add('show');
+    setStatus('Missing pairing code. Scan the QR code on your computer.', 'error');
+    return;
+  }
+  if(!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    setStatus('Your browser blocked the camera because the page isn\'t secure. Open the https:// address from your computer (not http://).', 'error');
+    return;
+  }
+  startBtn.disabled = true;
+  setStatus('Asking for camera access…');
+  try{
+    await openCamera();
+  } catch(e){
+    startBtn.disabled = false;
+    const denied = e && (e.name === 'NotAllowedError' || e.name === 'SecurityError');
+    setStatus(denied
+      ? 'Camera access was blocked. Allow the camera for this site in your browser settings, then tap Start camera again.'
+      : 'Couldn\'t open the camera (' + (e && e.message ? e.message : e) + ').', 'error');
+    return;
+  }
+  running = true;
+  startBtn.disabled = false;
+  startBtn.textContent = 'Stop';
+  startBtn.classList.add('stop');
+  flipBtn.disabled = false;
+  setStatus('Connecting to your computer…');
+  keepAwake();
+  pump();
+}
+
+function stop(){
+  running = false;
+  if(stream){ stream.getTracks().forEach(t => t.stop()); stream = null; }
+  video.srcObject = null;
+  empty.style.display = '';
+  startBtn.textContent = 'Start camera';
+  startBtn.classList.remove('stop');
+  flipBtn.disabled = true;
+  statsEl.textContent = '';
+  if(wakeLock){ wakeLock.release().catch(() => {}); wakeLock = null; }
+  if(!statusEl.classList.contains('error')) setStatus('Stopped. Tap Start camera to continue.');
+}
+
+startBtn.addEventListener('click', () => running ? stop() : start());
+
+flipBtn.addEventListener('click', async () => {
+  facing = facing === 'environment' ? 'user' : 'environment';
+  try{ await openCamera(); }
+  catch(e){ setStatus('Couldn\'t switch cameras (' + (e && e.message ? e.message : e) + ').', 'error'); }
+});
+
+// Phones pause the camera when the screen locks or you switch apps; pick it
+// back up when this page is visible again.
+document.addEventListener('visibilitychange', async () => {
+  if(document.visibilityState !== 'visible' || !running) return;
+  keepAwake();
+  const live = stream && stream.getVideoTracks().some(t => t.readyState === 'live');
+  if(!live){
+    try{ await openCamera(); } catch(e){ stop(); }
+  }
+});
+
+if(!code){
+  document.getElementById('codeEntry').classList.add('show');
+  setStatus('Missing pairing code. Scan the QR code on your computer.', 'error');
+}
+</script>
+</body>
+</html>

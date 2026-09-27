@@ -360,6 +360,47 @@ svg.chart{width:100%;height:150px;display:block;overflow:visible;}
 .cam-foot{display:flex;justify-content:space-between;padding:11px 18px;border-top:1px solid var(--border);font-family:var(--font-body);font-weight:700;font-size:11px;color:var(--muted-fg);}
 .cam-foot b{color:var(--fg);}
 
+/* Camera slot picker and phone link */
+.cam-setup{padding:18px 22px 20px;margin-bottom:22px;}
+.cam-setup:hover{transform:none;}
+.cam-setup-actions{display:flex;gap:8px;}
+.cam-setup-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+.cam-slot{display:flex;flex-direction:column;gap:6px;min-width:0;}
+.cam-slot-label{font-weight:800;font-size:12.5px;color:var(--fg);}
+.cam-slot-label em{display:block;font-style:normal;font-weight:700;font-size:11px;color:var(--muted-fg);margin-top:2px;}
+.cam-slot select{
+  appearance:none;-webkit-appearance:none;width:100%;
+  background:var(--muted) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2378786C' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center;
+  border:1.5px solid var(--border);border-radius:999px;padding:9px 34px 9px 14px;
+  font-size:13px;font-weight:700;color:var(--fg);cursor:pointer;
+}
+.cam-slot select:hover{border-color:var(--primary);}
+.cam-slot-state{font-size:11px;font-weight:700;color:var(--muted-fg);}
+.cam-slot-state.live{color:var(--primary);}
+.cam-slot-state.bad{color:var(--destructive);}
+.phone-link{display:flex;gap:22px;align-items:flex-start;margin-top:18px;padding-top:18px;border-top:1px dashed var(--border);}
+.phone-qr{
+  flex-shrink:0;width:176px;height:176px;background:#fff;border-radius:1.25rem;border:1px solid var(--border);
+  padding:8px;display:flex;align-items:center;justify-content:center;
+  font-size:11.5px;color:var(--muted-fg);text-align:center;line-height:1.4;
+}
+.phone-qr svg{width:100%;height:100%;display:block;}
+.phone-steps{min-width:0;flex:1;font-size:12.5px;color:var(--accent-fg);line-height:1.55;}
+.phone-steps-title{font-family:var(--font-display);font-weight:600;font-size:15px;color:var(--fg);margin-bottom:6px;}
+.phone-steps ol{margin:0 0 10px;padding-left:18px;}
+.phone-steps li{margin-bottom:3px;}
+.phone-steps code{font-size:11.5px;background:var(--muted);border:1px solid var(--border);border-radius:6px;padding:1px 6px;word-break:break-all;}
+.phone-url-row{margin-bottom:10px;}
+.phone-status-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+.phone-help{margin-top:10px;}
+.phone-help summary{cursor:pointer;font-weight:800;font-size:11.5px;color:var(--secondary);}
+.phone-help ul{margin:8px 0 0;padding-left:18px;}
+.phone-help li{margin-bottom:5px;}
+@media(max-width:980px){
+  .cam-setup-grid{grid-template-columns:1fr;}
+  .phone-link{flex-direction:column;}
+}
+
 .rec-controls{display:flex;align-items:center;gap:18px;margin-top:22px;flex-wrap:wrap;}
 .record-btn{
   display:flex;align-items:center;gap:11px;background:var(--primary);
@@ -749,18 +790,66 @@ input[type=range]::-webkit-slider-thumb{
       <section class="panel" id="panel-record">
         <div class="preview-note" id="backendStatusNote">Press Start recording to connect to the BackTrack backend at 127.0.0.1:5050.</div>
 
+        <div class="card r-b cam-setup" id="camSetupCard">
+          <div class="threshold-panel-head">
+            <span class="threshold-panel-title">Cameras</span>
+            <div class="cam-setup-actions">
+              <button class="threshold-test-btn" id="camSwapBtn" type="button">Swap</button>
+              <button class="threshold-test-btn" id="camRescanBtn" type="button">Rescan</button>
+            </div>
+          </div>
+          <div class="cam-setup-grid">
+            <label class="cam-slot">
+              <span class="cam-slot-label">Front camera <em>faces you: eyes, head tilt, shoulders</em></span>
+              <select id="camFrontSelect" data-role="front"></select>
+              <span class="cam-slot-state" id="camFrontState"></span>
+            </label>
+            <label class="cam-slot">
+              <span class="cam-slot-label">Side camera <em>from your side: neck and back angle</em></span>
+              <select id="camSideSelect" data-role="side"></select>
+              <span class="cam-slot-state" id="camSideState"></span>
+            </label>
+          </div>
+
+          <div class="phone-link">
+            <div class="phone-qr" id="phoneQr" aria-label="QR code to open the phone camera page"></div>
+            <div class="phone-steps">
+              <div class="phone-steps-title">Use your phone as a camera</div>
+              <ol>
+                <li>Connect your phone to the same Wi-Fi as this computer.</li>
+                <li>Scan this code with your phone's camera.</li>
+                <li>Your phone will warn that the connection isn't private. That's expected: the link stays on your Wi-Fi. Tap <b>Show Details → visit this website</b> (iPhone) or <b>Advanced → Proceed</b> (Android). You only do this once.</li>
+                <li>Tap <b>Start camera</b> and allow camera access. Stand the phone to your side at about shoulder height.</li>
+              </ol>
+              <div class="phone-url-row">Or type this address: <code id="phoneUrl">loading…</code></div>
+              <div class="phone-status-row">
+                <span class="cam-status offline" id="phoneStatus"><span class="dot"></span>No phone yet</span>
+                <button class="threshold-test-btn" id="phoneNewCodeBtn" type="button">New code</button>
+              </div>
+              <details class="phone-help">
+                <summary>Phone can't connect?</summary>
+                <ul>
+                  <li><b>Firewall:</b> the first time BackTrack runs, Windows or macOS asks whether Python may accept connections. Allow it on private networks. On Linux, open port 5051 (e.g. <code>sudo ufw allow 5051/tcp</code>).</li>
+                  <li><b>School, work or guest Wi-Fi</b> often stops devices from reaching each other. Turn on your phone's hotspot, connect this computer to it, then press <b>New code</b>.</li>
+                  <li><b>Wrong network address:</b> if this computer has several network adapters, try one of these instead: <span id="phoneAltUrls">none</span></li>
+                </ul>
+              </details>
+            </div>
+          </div>
+        </div>
+
         <div class="rec-grid">
           <div class="card r-a cam-panel">
             <div class="cam-head">
               <span class="cam-name"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="14" height="12" rx="2"/><path d="M16 10l6-4v12l-6-4"/></svg> Front camera</span>
-              <span class="cam-status offline" id="frontCamStatus"><span class="dot"></span>Not connected</span>
+              <span class="cam-status offline" id="frontCamStatus"><span class="dot"></span>Not tracking</span>
               <button class="recal-btn" data-cam="front">Recalibrate</button>
             </div>
             <div class="cam-view" id="frontCamView">
               <img class="cam-feed-img hidden" id="frontFeedImg" alt="Front camera feed">
               <div class="cam-placeholder" id="frontPlaceholder">
                 <span class="dot-pulse offline"></span>
-                <span>Front camera preview appears here once you press Start recording.</span>
+                <span>Connecting to the front camera…</span>
               </div>
             </div>
             <div class="cam-foot"><span>Head pitch <b id="frontPitchVal">0.0 degrees</b></span><span>Head roll <b id="frontRollVal">0.0 degrees</b></span></div>
@@ -769,14 +858,14 @@ input[type=range]::-webkit-slider-thumb{
           <div class="card r-c cam-panel">
             <div class="cam-head">
               <span class="cam-name"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="7" y="2" width="10" height="20" rx="2"/><line x1="11" y1="18" x2="13" y2="18"/></svg> Side camera</span>
-              <span class="cam-status offline" id="sideCamStatus"><span class="dot"></span>Not connected</span>
+              <span class="cam-status offline" id="sideCamStatus"><span class="dot"></span>Not tracking</span>
               <button class="recal-btn" data-cam="side">Recalibrate</button>
             </div>
             <div class="cam-view" id="sideCamView">
               <img class="cam-feed-img hidden" id="sideFeedImg" alt="Side camera feed">
               <div class="cam-placeholder" id="sidePlaceholder">
                 <span class="dot-pulse offline"></span>
-                <span>Side camera preview appears here once you press Start recording.</span>
+                <span>Connecting to the side camera…</span>
               </div>
             </div>
             <div class="cam-foot"><span>Neck angle <b id="sideNeckVal">0.0 degrees</b></span><span>Torso lean <b id="sideTorsoVal">0.0 degrees</b></span></div>
@@ -1016,9 +1105,15 @@ function authHeaders(extra){
   return h;
 }
 
+// <img> and EventSource can't send headers, so the camera feeds and live
+// stream take the login token in the URL instead.
+function authedUrl(path){
+  return BACKEND_URL + path + (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(authToken || '');
+}
+
 function connectStream(){
   if(eventSource) return;
-  eventSource = new EventSource(BACKEND_URL + '/stream');
+  eventSource = new EventSource(authedUrl('/stream'));
 
   eventSource.onopen = function(){
     streamConnected = true;
@@ -1046,7 +1141,7 @@ function setCamStatus(id, online){
   const el = document.getElementById(id);
   if(!el) return;
   el.classList.toggle('offline', !online);
-  el.innerHTML = '<span class="dot"></span>' + (online ? 'Connected' : 'Not connected');
+  el.innerHTML = '<span class="dot"></span>' + (online ? 'Tracking you' : 'Not tracking');
 }
 
 /* ============ THRESHOLD PROGRESS BARS (one per trigger) ============ */
@@ -1137,7 +1232,7 @@ function connectCamFeed(imgId, placeholderId, path){
     img.classList.add('hidden');
     placeholder.classList.remove('hidden');
   };
-  img.src = BACKEND_URL + path + '?t=' + Date.now();
+  img.src = authedUrl(path) + '&t=' + Date.now();
 }
 function disconnectCamFeed(imgId, placeholderId){
   const img = document.getElementById(imgId);
@@ -1146,6 +1241,145 @@ function disconnectCamFeed(imgId, placeholderId){
   img.removeAttribute('src');
   img.classList.add('hidden');
   document.getElementById(placeholderId).classList.remove('hidden');
+}
+
+// Previews run whenever the Record tab is open (not only while recording)
+// so you can check which camera is which before you start.
+let feedsShown = false;
+function showFeeds(){
+  if(feedsShown) return;
+  feedsShown = true;
+  connectCamFeed('frontFeedImg', 'frontPlaceholder', '/feed/front');
+  connectCamFeed('sideFeedImg', 'sidePlaceholder', '/feed/side');
+}
+function hideFeeds(){
+  if(!feedsShown) return;
+  feedsShown = false;
+  disconnectCamFeed('frontFeedImg', 'frontPlaceholder');
+  disconnectCamFeed('sideFeedImg', 'sidePlaceholder');
+}
+
+/* ============ CAMERA SLOTS AND PHONE LINK ============ */
+const CAM_STATE_TEXT = {
+  live:        ['Live', 'live'],
+  waiting:     ['Waiting for your phone', ''],
+  unavailable: ['Not sending video. Close other apps using it, then press Rescan.', 'bad'],
+  none:        ['Off', ''],
+};
+let camerasTimer = null;
+let recordTabActive = false;
+
+function fillCamSelect(select, sources, value){
+  if(document.activeElement === select) return; // don't reset it mid-choice
+  const opts = sources.map(s => [s.id, s.id === 'phone' ? 'Phone (scan the QR code)' : s.label]).concat([['', 'None']]);
+  const sig = JSON.stringify(opts);
+  if(select.dataset.sig !== sig){
+    select.innerHTML = '';
+    opts.forEach(([id, label]) => {
+      const o = document.createElement('option');
+      o.value = id; o.textContent = label;
+      select.appendChild(o);
+    });
+    select.dataset.sig = sig;
+  }
+  select.value = value == null ? '' : value;
+}
+
+function renderCameras(data){
+  if(!data || !data.assignment) return;
+  [['front', 'camFrontSelect', 'camFrontState'], ['side', 'camSideSelect', 'camSideState']].forEach(([role, selId, stateId]) => {
+    fillCamSelect(document.getElementById(selId), data.sources || [], data.assignment[role]);
+    const [text, cls] = CAM_STATE_TEXT[(data.status || {})[role]] || CAM_STATE_TEXT.none;
+    const el = document.getElementById(stateId);
+    el.textContent = text;
+    el.className = 'cam-slot-state' + (cls ? ' ' + cls : '');
+  });
+  const phoneRole = data.assignment.front === 'phone' ? 'front' : data.assignment.side === 'phone' ? 'side' : null;
+  const ps = document.getElementById('phoneStatus');
+  ps.classList.toggle('offline', !data.phone_connected);
+  ps.innerHTML = '<span class="dot"></span>' + (data.phone_connected
+    ? (phoneRole ? 'Phone connected: used as the ' + phoneRole + ' camera' : 'Phone connected but unused. Pick Phone in a slot above.')
+    : 'No phone yet');
+}
+
+async function camerasRequest(path, options){
+  const resp = await fetch(BACKEND_URL + path,
+    Object.assign({ headers: authHeaders({'Content-Type': 'application/json'}) }, options || {}));
+  const data = await resp.json();
+  renderCameras(data);
+  if(!resp.ok) throw new Error(data.error || 'Camera change failed.');
+  return data;
+}
+
+async function refreshCameras(){
+  try{ await camerasRequest('/cameras'); } catch(err){ /* backend offline: the feed placeholders say so */ }
+}
+
+function renderPhoneLink(data){
+  const qr = document.getElementById('phoneQr');
+  if(data.error){
+    qr.textContent = data.error;
+  } else if(data.url && data.qr_svg){
+    qr.innerHTML = data.qr_svg; // generated by the backend's QR library
+  }
+  document.getElementById('phoneUrl').textContent = data.url || '—';
+  const alts = data.alternates || [];
+  document.getElementById('phoneAltUrls').textContent = alts.length ? alts.join('  ·  ') : 'none found';
+}
+
+async function loadPhoneLink(newCode){
+  try{
+    const resp = await fetch(BACKEND_URL + (newCode ? '/phone/link/new' : '/phone/link'),
+      { method: newCode ? 'POST' : 'GET', headers: authHeaders() });
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || 'bad status');
+    renderPhoneLink(data);
+  } catch(err){
+    document.getElementById('phoneQr').textContent = "Couldn't reach the BackTrack backend.";
+  }
+}
+
+document.querySelectorAll('#camFrontSelect, #camSideSelect').forEach(sel => {
+  sel.addEventListener('change', async function(){
+    const body = {};
+    body[this.dataset.role] = this.value || null;
+    this.blur();
+    try{ await camerasRequest('/cameras', { method: 'POST', body: JSON.stringify(body) }); }
+    catch(err){ showToast('Camera change failed', err.message); }
+  });
+});
+
+document.getElementById('camSwapBtn').addEventListener('click', async function(){
+  this.disabled = true;
+  try{ await camerasRequest('/cameras/swap', { method: 'POST' }); }
+  catch(err){ showToast('Swap failed', err.message); }
+  finally{ this.disabled = false; }
+});
+
+document.getElementById('camRescanBtn').addEventListener('click', async function(){
+  const original = this.textContent;
+  this.disabled = true;
+  this.textContent = 'Scanning…';
+  try{ await camerasRequest('/cameras/rescan', { method: 'POST' }); }
+  catch(err){ showToast('Rescan failed', err.message); }
+  finally{ this.disabled = false; this.textContent = original; }
+});
+
+document.getElementById('phoneNewCodeBtn').addEventListener('click', () => loadPhoneLink(true));
+
+function enterRecordTab(){
+  recordTabActive = true;
+  showFeeds();
+  refreshCameras();
+  loadPhoneLink(false);
+  clearInterval(camerasTimer);
+  camerasTimer = setInterval(refreshCameras, 2000);
+}
+function leaveRecordTab(){
+  recordTabActive = false;
+  clearInterval(camerasTimer);
+  camerasTimer = null;
+  if(!recording) hideFeeds();
 }
 
 /* ============ RECALIBRATE ============ */
@@ -1157,7 +1391,7 @@ document.querySelectorAll('.recal-btn').forEach(function(btn){
     this.textContent = 'Recalibrating';
     this.disabled = true;
     try{
-      await fetch(BACKEND_URL + endpoint, { method: 'POST' });
+      await fetch(BACKEND_URL + endpoint, { method: 'POST', headers: authHeaders() });
     } catch(err){
       console.warn('The recalibration request may still have reached the backend even though the response could not be read here.', err);
     }
@@ -1179,6 +1413,7 @@ async function enterApp(){
   document.getElementById('avatarInitials').textContent = initialsFor(currentUser ? currentUser.name : '');
   loadHistory();
   loadSettingsFromBackend();
+  if(document.getElementById('panel-record').classList.contains('active')) enterRecordTab();
 }
 
 async function checkBackendOnline(){
@@ -1265,6 +1500,8 @@ document.getElementById('logoutBtn').addEventListener('click', async function(){
   document.getElementById('app-shell').classList.add('hidden');
   document.getElementById('login-screen').classList.remove('hidden');
   disconnectStream();
+  if(recordTabActive) leaveRecordTab();
+  hideFeeds();
   try{ await fetch(BACKEND_URL + '/auth/logout', { method: 'POST', headers: authHeaders() }); } catch(err){}
   authToken = null;
   currentUser = null;
@@ -1316,6 +1553,11 @@ document.querySelectorAll('.nav-item').forEach(btn => {
     document.getElementById('pageTitle').textContent = titles[tab][0];
     document.getElementById('pageSub').textContent = titles[tab][1];
 
+    if(tab === 'record'){
+      enterRecordTab();
+    } else if(recordTabActive){
+      leaveRecordTab();
+    }
     if(tab === 'history'){
       loadHistory();
     }
@@ -1390,8 +1632,7 @@ recordBtn.addEventListener('click', async function(){
 
     recording = true;
     connectStream();
-    connectCamFeed('frontFeedImg', 'frontPlaceholder', '/feed/front');
-    connectCamFeed('sideFeedImg', 'sidePlaceholder', '/feed/side');
+    showFeeds();
 
     recordBtn.classList.add('recording');
     recordBtnText.textContent = 'Stop recording';
@@ -1418,8 +1659,7 @@ recordBtn.addEventListener('click', async function(){
     clearInterval(timerInterval);
 
     disconnectStream();
-    disconnectCamFeed('frontFeedImg', 'frontPlaceholder');
-    disconnectCamFeed('sideFeedImg', 'sidePlaceholder');
+    if(!recordTabActive) hideFeeds();
     setCamStatus('frontCamStatus', false);
     setCamStatus('sideCamStatus', false);
     resetThresholdBars();
@@ -1703,9 +1943,12 @@ async function loadHistory(){
     return;
   }
 
-  const scored = sessions.filter(s => s.posture_score != null && s.eye_strain_index != null);
+  // With only one camera a session can have a posture score but no eye
+  // score (no face in view) or the reverse, so each metric uses its own list.
+  const postureScored = sessions.filter(s => s.posture_score != null);
+  const eyeScored = sessions.filter(s => s.eye_strain_index != null);
 
-  if(scored.length === 0){
+  if(postureScored.length === 0 && eyeScored.length === 0){
     note.textContent = 'No completed sessions yet. Head to the Record tab and press Start recording to log your first session.';
     note.classList.remove('hidden');
     setEmptyHistoryState();
@@ -1714,100 +1957,125 @@ async function loadHistory(){
 
   note.classList.add('hidden');
 
-  const avgPosture = average(scored.map(s=>s.posture_score));
-  const avgEye = average(scored.map(s=>s.eye_strain_index));
   const avgMinutes = average(sessions.map(s=>s.duration_seconds/60));
-
-  document.getElementById('tilePostureValue').innerHTML = Math.round(avgPosture) + '<span>out of 100</span>';
-  document.getElementById('tileEyeValue').innerHTML = avgEye.toFixed(1) + '<span>out of 10</span>';
   document.getElementById('tileSessionsValue').innerHTML = sessions.length + '<span>logged</span>';
   document.getElementById('tileSessionsFoot').innerHTML = 'Average length: <b>' + Math.round(avgMinutes) + ' minute' + (Math.round(avgMinutes)===1?'':'s') + '</b>';
-
-  const postureBreakdown = averageBreakdown(scored, 'posture_breakdown', ['neck','torso','pitch','roll','shrug']);
-  renderBreakdown('postureBreakdown', [
-    {label:'Neck angle',     val: postureBreakdown.neck,  max:40},
-    {label:'Torso lean',     val: postureBreakdown.torso, max:30},
-    {label:'Head pitch',     val: postureBreakdown.pitch, max:15},
-    {label:'Head roll',      val: postureBreakdown.roll,  max:15},
-    {label:'Shoulder shrug', val: postureBreakdown.shrug, max:10},
-  ]);
-
-  const eyeBreakdown = averageBreakdown(scored, 'eye_breakdown', ['blink','ear']);
-  renderBreakdown('eyeBreakdown', [
-    {label:'Low blink rate', val: eyeBreakdown.blink, max:6},
-    {label:'Eye narrowing',  val: eyeBreakdown.ear,   max:4},
-  ]);
-
-  if(scored.length >= 2){
-    const last = scored[scored.length-1], prev = scored[scored.length-2];
-    const pDelta = Math.round(last.posture_score - prev.posture_score);
-    const eDelta = Math.round((last.eye_strain_index - prev.eye_strain_index)*10)/10;
-    setBadge('tilePostureBadge', pDelta>=0 ? 'good':'warn', (pDelta>=0?'Up ':'Down ')+Math.abs(pDelta)+' vs last session');
-    setBadge('tileEyeBadge', eDelta<=0 ? 'good':'warn', (eDelta<=0?'Down ':'Up ')+Math.abs(eDelta)+' vs last session');
-  } else {
-    setBadge('tilePostureBadge','neutral','First session');
-    setBadge('tileEyeBadge','neutral','First session');
-  }
   setBadge('tileSessionsBadge','neutral', sessions.length===1 ? '1 session' : sessions.length+' sessions');
 
-  let streak = 0;
-  for(let i=scored.length-1;i>=0;i--){ if(scored[i].posture_score>80) streak++; else break; }
-  document.getElementById('tilePostureFoot').innerHTML = streak>0
-    ? 'Current streak: <b>'+streak+' session'+(streak===1?'':'s')+'</b> above 80'
-    : 'No active streak above 80 right now';
+  const aiPlaceholder = msg => '<p class="ai-insight-placeholder">' + msg + '</p>';
 
-  const lastBlink = scored[scored.length-1].avg_blink_rate;
-  document.getElementById('tileEyeFoot').innerHTML = (lastBlink!=null)
-    ? 'Latest avg blink rate: <b>'+lastBlink+' per minute</b>'
-    : 'No blink data recorded yet';
+  if(postureScored.length){
+    const avgPosture = average(postureScored.map(s=>s.posture_score));
+    document.getElementById('tilePostureValue').innerHTML = Math.round(avgPosture) + '<span>out of 100</span>';
 
-  const trend = scored.slice(-14);
-  const dates = trend.map(s => fmtDateShort(s.end_time));
+    const postureBreakdown = averageBreakdown(postureScored, 'posture_breakdown', ['neck','torso','pitch','roll','shrug']);
+    renderBreakdown('postureBreakdown', [
+      {label:'Neck angle',     val: postureBreakdown.neck,  max:40},
+      {label:'Torso lean',     val: postureBreakdown.torso, max:30},
+      {label:'Head pitch',     val: postureBreakdown.pitch, max:15},
+      {label:'Head roll',      val: postureBreakdown.roll,  max:15},
+      {label:'Shoulder shrug', val: postureBreakdown.shrug, max:10},
+    ]);
 
-  if(trend.length >= 2){
+    if(postureScored.length >= 2){
+      const last = postureScored[postureScored.length-1], prev = postureScored[postureScored.length-2];
+      const pDelta = Math.round(last.posture_score - prev.posture_score);
+      setBadge('tilePostureBadge', pDelta>=0 ? 'good':'warn', (pDelta>=0?'Up ':'Down ')+Math.abs(pDelta)+' vs last session');
+    } else {
+      setBadge('tilePostureBadge','neutral','First session');
+    }
+
+    let streak = 0;
+    for(let i=postureScored.length-1;i>=0;i--){ if(postureScored[i].posture_score>80) streak++; else break; }
+    document.getElementById('tilePostureFoot').innerHTML = streak>0
+      ? 'Current streak: <b>'+streak+' session'+(streak===1?'':'s')+'</b> above 80'
+      : 'No active streak above 80 right now';
+
+    const sidebarScore = document.getElementById('sidebarScoreValue');
+    if(sidebarScore) sidebarScore.textContent = Math.round(postureScored[postureScored.length-1].posture_score);
+  } else {
+    document.getElementById('tilePostureValue').innerHTML = '--<span>out of 100</span>';
+    setBadge('tilePostureBadge','neutral','No data');
+    document.getElementById('tilePostureFoot').textContent = 'No posture data yet — make sure a camera can see you';
+    renderBreakdown('postureBreakdown', []);
+  }
+
+  if(eyeScored.length){
+    const avgEye = average(eyeScored.map(s=>s.eye_strain_index));
+    document.getElementById('tileEyeValue').innerHTML = avgEye.toFixed(1) + '<span>out of 10</span>';
+
+    const eyeBreakdown = averageBreakdown(eyeScored, 'eye_breakdown', ['blink','ear']);
+    renderBreakdown('eyeBreakdown', [
+      {label:'Low blink rate', val: eyeBreakdown.blink, max:6},
+      {label:'Eye narrowing',  val: eyeBreakdown.ear,   max:4},
+    ]);
+
+    if(eyeScored.length >= 2){
+      const last = eyeScored[eyeScored.length-1], prev = eyeScored[eyeScored.length-2];
+      const eDelta = Math.round((last.eye_strain_index - prev.eye_strain_index)*10)/10;
+      setBadge('tileEyeBadge', eDelta<=0 ? 'good':'warn', (eDelta<=0?'Down ':'Up ')+Math.abs(eDelta)+' vs last session');
+    } else {
+      setBadge('tileEyeBadge','neutral','First session');
+    }
+
+    const lastBlink = eyeScored[eyeScored.length-1].avg_blink_rate;
+    document.getElementById('tileEyeFoot').innerHTML = (lastBlink!=null)
+      ? 'Latest avg blink rate: <b>'+lastBlink+' per minute</b>'
+      : 'No blink data recorded yet';
+  } else {
+    document.getElementById('tileEyeValue').innerHTML = '--<span>out of 10</span>';
+    setBadge('tileEyeBadge','neutral','No data');
+    document.getElementById('tileEyeFoot').textContent = 'Eye tracking needs the front camera to see your face';
+    renderBreakdown('eyeBreakdown', []);
+  }
+
+  const postureTrend = postureScored.slice(-14);
+  if(postureTrend.length >= 2){
+    const dates = postureTrend.map(s => fmtDateShort(s.end_time));
     document.getElementById('postureChartEmpty').classList.add('hidden');
     document.getElementById('postureChartBody').classList.remove('hidden');
-    document.getElementById('eyeChartEmpty').classList.add('hidden');
-    document.getElementById('eyeChartBody').classList.remove('hidden');
-
     buildAxisLabels('postureAxisLabels', pickLabelSubset(dates));
-    buildAxisLabels('eyeAxisLabels', pickLabelSubset(dates));
-
-    const postureVals = trend.map(s=>s.posture_score);
-    const eyeVals = trend.map(s=>s.eye_strain_index);
-
+    const postureVals = postureTrend.map(s=>s.posture_score);
     drawTrendLine('posture', postureVals, 100, dates, v => Math.round(v) + ' / 100');
-    drawTrendLine('eye', eyeVals, 10, dates, v => v.toFixed(1) + ' / 10');
 
     const lastP = postureVals[postureVals.length-1], firstP = postureVals[0];
     const pDiff = Math.abs(Math.round(lastP-firstP));
     document.getElementById('postureCurrentVal').innerHTML = Math.round(lastP) +
       ' <span style="font-size:13px;color:'+(lastP>=firstP?'var(--primary)':'var(--destructive)')+';">'+(lastP>=firstP?'up ':'down ')+pDiff+'</span>';
+    document.getElementById('postureInsightText').textContent = buildPostureInsight(postureTrend);
+  } else {
+    document.getElementById('postureChartEmpty').classList.remove('hidden');
+    document.getElementById('postureChartBody').classList.add('hidden');
+    document.getElementById('postureCurrentVal').textContent = postureTrend.length ? Math.round(postureTrend[0].posture_score) : '--';
+  }
+
+  const eyeTrend = eyeScored.slice(-14);
+  if(eyeTrend.length >= 2){
+    const dates = eyeTrend.map(s => fmtDateShort(s.end_time));
+    document.getElementById('eyeChartEmpty').classList.add('hidden');
+    document.getElementById('eyeChartBody').classList.remove('hidden');
+    buildAxisLabels('eyeAxisLabels', pickLabelSubset(dates));
+    const eyeVals = eyeTrend.map(s=>s.eye_strain_index);
+    drawTrendLine('eye', eyeVals, 10, dates, v => v.toFixed(1) + ' / 10');
 
     const lastE = eyeVals[eyeVals.length-1], firstE = eyeVals[0];
     const eDiff = Math.abs(lastE-firstE).toFixed(1);
     document.getElementById('eyeCurrentVal').innerHTML = lastE.toFixed(1) +
       ' <span style="font-size:13px;color:'+(lastE<=firstE?'var(--primary)':'var(--destructive)')+';">'+(lastE<=firstE?'down ':'up ')+eDiff+'</span>';
-
-    document.getElementById('postureInsightText').textContent = buildPostureInsight(trend);
-    document.getElementById('eyeInsightText').textContent = buildEyeInsight(trend);
+    document.getElementById('eyeInsightText').textContent = buildEyeInsight(eyeTrend);
   } else {
-    document.getElementById('postureChartEmpty').classList.remove('hidden');
-    document.getElementById('postureChartBody').classList.add('hidden');
     document.getElementById('eyeChartEmpty').classList.remove('hidden');
     document.getElementById('eyeChartBody').classList.add('hidden');
-    document.getElementById('postureCurrentVal').textContent = Math.round(trend[0].posture_score);
-    document.getElementById('eyeCurrentVal').textContent = trend[0].eye_strain_index.toFixed(1);
+    document.getElementById('eyeCurrentVal').textContent = eyeTrend.length ? eyeTrend[0].eye_strain_index.toFixed(1) : '--';
   }
-
-  const sidebarScore = document.getElementById('sidebarScoreValue');
-  if(sidebarScore) sidebarScore.textContent = Math.round(scored[scored.length-1].posture_score);
 
   // Pull the Gemini-generated reports for whatever data now exists.
   // The backend caches these per session-count, so this is cheap to call
   // every time History reloads.
-  fetchInsight('posture', false);
-  fetchInsight('eye', false);
+  if(postureScored.length) fetchInsight('posture', false);
+  else document.getElementById('postureAiBody').innerHTML = aiPlaceholder('Record a session where a camera can see you to get a posture report.');
+  if(eyeScored.length) fetchInsight('eye', false);
+  else document.getElementById('eyeAiBody').innerHTML = aiPlaceholder('Eye reports need a session where the front camera could see your face.');
 }
 
 /* ============ EXPORT: CHECKBOXES, DATE RANGE, LIVE PREVIEW ============ */
@@ -1864,11 +2132,14 @@ async function refreshExportPreview(){
     if(to && d > to) return false;
     return true;
   });
-  const scored = inRange.filter(s => s.posture_score != null && s.eye_strain_index != null);
+  // A session can have a posture score without an eye score (or vice versa)
+  // when only one camera was in use, so average each over its own sessions.
+  const postureScored = inRange.filter(s => s.posture_score != null);
+  const eyeScored = inRange.filter(s => s.eye_strain_index != null);
 
   document.getElementById('rsRange').textContent = (from ? fmtDateLong(from) : 'earliest') + ' to ' + (to ? fmtDateLong(to) : 'latest');
-  document.getElementById('rsPosture').textContent = scored.length ? Math.round(average(scored.map(s=>s.posture_score))) + ' out of 100' : '--';
-  document.getElementById('rsEye').textContent = scored.length ? average(scored.map(s=>s.eye_strain_index)).toFixed(1) + ' out of 10' : '--';
+  document.getElementById('rsPosture').textContent = postureScored.length ? Math.round(average(postureScored.map(s=>s.posture_score))) + ' out of 100' : '--';
+  document.getElementById('rsEye').textContent = eyeScored.length ? average(eyeScored.map(s=>s.eye_strain_index)).toFixed(1) + ' out of 10' : '--';
   document.getElementById('rsSessions').textContent = inRange.length;
   document.getElementById('rsFormat').textContent = 'PDF';
 

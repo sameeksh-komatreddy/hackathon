@@ -1,0 +1,16 @@
+# Secrets: never commit these (API keys live in .env)
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# OS and editor clutter
+.DS_Store
+Thumbs.db
+.claude/settings.local.json

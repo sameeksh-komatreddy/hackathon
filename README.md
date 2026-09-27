@@ -29,3 +29,61 @@ Lastly, we connected a Gemini API key to the application which analyzes the coll
 ## Challenges we ran into
 
 While we originally thought splitting into different teams would be a good way to ensure work runs as smoothly, we faced issues when we had to merge all of our code. Some of us worked on the backend, with little care for the front end, while others worked on the front end, with little care for the backend making this process very tedious. There were times we thought that we wouldn't finish with the stress that we were facing. All of our concerns were alleviated when one of our laptops suddenly got a notification telling us to sit up straight; our app had worked!
+
+## Running locally
+
+The current version is `backend_pm.py` + `frontend_pm.html` (with `cameras.py`, `phone_link.py` and `phone_camera.html`). The other `backend_*` / `frontend_*` files are earlier iterations.
+
+### 1. Install
+
+Works on Windows, macOS and Linux. Tested with Python 3.12.
+
+```
+python -m venv .venv
+.venv\Scripts\activate          # Windows
+source .venv/bin/activate       # macOS / Linux
+pip install -r requirements.txt
+```
+
+For AI tips, copy `.env.example` to `.env` and paste in a Gemini API key. Everything else works without it.
+
+### 2. Start
+
+```
+python backend_pm.py
+```
+
+Then open `frontend_pm.html` in your browser and create an account. The first run downloads the MediaPipe models into `~/.backtrack`, which is also where accounts, sessions and settings are kept.
+
+- **macOS:** allow Terminal (or your editor) to use the camera under System Settings → Privacy & Security → Camera.
+- **Windows / macOS:** you'll be asked whether Python may accept network connections. Allow it on private networks; that's what lets a phone connect.
+
+### 3. Cameras
+
+BackTrack has two camera slots:
+
+- **Front** faces you and tracks your eyes, head tilt and shoulders.
+- **Side** sits beside you and tracks your neck and back angle.
+
+With a single webcam, it becomes the front camera and the side slot waits for a phone. Pick or swap cameras in the **Cameras** card on the Record tab; your choice is remembered. You can record with just one camera: the scores use whatever that camera can see.
+
+### 4. Using a phone as a camera
+
+Any phone with a browser works with any computer. No app is needed.
+
+1. Put the phone on the same Wi-Fi as the computer.
+2. On the Record tab, scan the QR code with the phone's camera.
+3. The phone warns that the connection isn't private. BackTrack uses its own certificate because the link never leaves your Wi-Fi. Tap **Show Details → visit this website** (iPhone) or **Advanced → Proceed** (Android). You only do this once.
+4. Tap **Start camera** and allow camera access.
+
+If it won't connect:
+
+- Check the computer's firewall allows Python (on Linux: `sudo ufw allow 5051/tcp`).
+- School, work and guest Wi-Fi often block devices from reaching each other. Use your phone's hotspot instead, then press **New code**.
+
+### 5. Tests
+
+```
+pip install pytest
+python -m pytest tests
+```

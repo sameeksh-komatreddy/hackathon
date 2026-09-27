@@ -21,7 +21,7 @@ Keeping each session within a Pro plan usage window:
 | D1 | No app server. Static site on Cloudflare Pages (free, works with private repos; GitHub Pages needs a public repo) | Agreed |
 | D2 | All data local in IndexedDB. No accounts or passwords; optional local profiles | Agreed |
 | D3 | Premade insight library replaces Gemini ([P6](roadmap/P6-insights.md)) | Agreed |
-| D4 | Vite + React (TypeScript optional) for the UI. `core/` and `storage/` stay plain modules with no React imports | Agreed |
+| D4 | Vite + React + TypeScript for the UI. `core/` and `storage/` stay plain modules with no React imports | Agreed |
 | D5 | Fix legacy bugs while porting, not in the Python app. Keep the Python backend as a reference until P3 is done, then archive it | Agreed |
 | D6 | Phone camera ships at launch as a WebRTC video stream, paired through a free Cloudflare Worker ([P7](roadmap/P7-phone.md)) | Agreed |
 | D7 | Lighting check and screen distance come after launch ([P11](roadmap/P11-post-launch.md)) | Proposed |
@@ -32,7 +32,7 @@ Keeping each session within a Pro plan usage window:
 
 **[P0–P1 Cleanup and foundation](roadmap/P0-P1-foundation.md)**
 - [x] S01 Repo cleanup: archive old iterations, fix the README
-- [ ] S02a ★ React scaffold and static layout
+- [x] S02a ★ React scaffold and static layout
 - [ ] S02b ⚙ Hook the React UI up to the Python backend
 - [ ] S03 ★ CI (tests and build) and Cloudflare Pages deploy
 
@@ -83,5 +83,7 @@ Keeping each session within a Pro plan usage window:
 ## Progress log
 
 _(newest first; keep 10)_
+
+- 2026-09-27 S02a: web/ Vite + React + TypeScript app, CSS copied as is, login + 4 tabs as components, Vitest render tests; login kept until local profiles replace it
 
 - 2026-09-27 S01: old iterations moved to legacy/, clutter untracked, SECRET_KEY removed, README fixed; no license (owner choice)

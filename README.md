@@ -4,9 +4,9 @@ We were inspired by our own lives. Hunched over hours of schoolwork, we noticed 
 
 ## What it does
 
-AL-I (Analytics Lifestyle Interface), which is a pun on the word Ally, as we hope this application will be for our users, utilizes video detection software to obtain certain landmarks on the user's body. For example, our application detects the position of your eyelid, ear, shoulder, hip, etc. Then, based on the position and angles between the different landmarks, the application is capable of identifying when you have a bad posture, are straining your eyes, etc. and for how long. Then, if the app notices trends, it pushes a notification to the user's device asking the 
+AL-I (Analytics Lifestyle Interface), which is a pun on the word Ally, as we hope this application will be for our users, utilizes video detection software to obtain certain landmarks on the user's body. For example, our application detects the position of your eyelid, ear, shoulder, hip, etc. Then, based on the position and angles between the different landmarks, the application is capable of identifying when you have a bad posture, are straining your eyes, etc. and for how long. Then, if a problem lasts past a set time (for example, slouching for a few minutes), it sends a notification reminding the user to fix it.
 
-We used MediaPipe and openCV to extract the landmarks from the user's camera and to overlay the relative positions and angles on top of the video itself to enable layman analyzation. Additionally, the video system also analyzes the user's environment (such as their lighting) to see if they are in a location which can increase their body's stress, strain, etc. and recommends suggestions.
+We used MediaPipe and openCV to extract the landmarks from the user's camera and to overlay the relative positions and angles on top of the video itself to enable layman analyzation.
 
 For example, one of our datapoints is the user's EAR value, which determines how open their eyes are to be used for fatigue. Here is the equation we had to use:
 
@@ -15,10 +15,6 @@ $$\\text{EAR} = \frac{||p_2 - p_6| + |p_3 - p_5||}{2|p_1 - p_4|}$$
 Additionally, to find the proximity of the shoulders to the ear (in order to detect sustained shoulder elevation), we used this equation:
 
 $$\text{Ratio} = \left( \frac{|\text{Shoulder}_y - \text{Ear}_y|}{\text{Torso Height}} \right) \times 100$$
-
-Furthermore, in order to detect the overall brightness of the scene, we used a series of the different pixel’s intensities, which can be represented by this:
-
-$$\text{Brightness} = \frac{1}{n} \sum_{i=1}^{n} P_i$$
 
 Additionally, in order to obtain the angle of inclination for their cervical (head) posture, we utilized this equation:
 
@@ -32,7 +28,7 @@ While we originally thought splitting into different teams would be a good way t
 
 ## Running locally
 
-The current version is `backend_pm.py` + `frontend_pm.html` (with `cameras.py`, `phone_link.py` and `phone_camera.html`). The other `backend_*` / `frontend_*` files are earlier iterations.
+The current version is `backend_pm.py` + `frontend_pm.html` (with `cameras.py`, `phone_link.py` and `phone_camera.html`). Earlier iterations are kept in `legacy/`.
 
 ### 1. Install
 

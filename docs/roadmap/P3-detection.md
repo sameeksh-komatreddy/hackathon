@@ -3,14 +3,14 @@
 Source of truth: `backend_pm.py` (grep function names; don't read the whole file). Everything goes in `web/src/core/`.
 
 ## S05 ⚙ Metrics and scoring
-- Port these as pure functions to `core/metrics.js`: `get_ear`, `get_angle`, `compute_posture_breakdown`, `compute_posture_score`, `compute_eye_strain`, `compute_eye_breakdown`.
+- Port these as pure functions to `core/metrics.ts`: `get_ear`, `get_angle`, `compute_posture_breakdown`, `compute_posture_score`, `compute_eye_strain`, `compute_eye_breakdown`.
 - Head pose: take pitch and roll from the face model's transformation matrix instead of OpenCV `solvePnP`/`RQDecomp3x3`. Check the sign conventions match the Python output.
-- Port `DEFAULT_SETTINGS` and `SETTINGS_BOUNDS` to `core/settings.js`.
+- Port `DEFAULT_SETTINGS` and `SETTINGS_BOUNDS` to `core/settings.ts`.
 - Port the matching cases from `tests/test_backend.py` to Vitest.
 - **Done when:** the ported tests pass with the same numbers as Python.
 
 ## S06 Tracking loops
-- `core/tracker.js`: front loop (eye openness, blink detection and rate over a 60 s window, head pitch/roll, shrug) and side loop (neck and torso angles). This replaces `front_thread`/`side_thread`.
+- `core/tracker.ts`: front loop (eye openness, blink detection and rate over a 60 s window, head pitch/roll, shrug) and side loop (neck and torso angles). This replaces `front_thread`/`side_thread`.
 - Use real frame timestamps (G10). Mirror the front view only on the display canvas.
 - Emit the same state shape the old `/stream` sent, so the UI port is easier.
 - **Done when:** a dev page shows live values that match the Python app for the same pose.

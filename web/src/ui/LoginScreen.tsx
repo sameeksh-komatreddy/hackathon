@@ -1,12 +1,35 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
+import { checkBackend, signIn, signUp, type User } from '../api.ts'
 import SpineLogo from './SpineLogo.tsx'
 
-export default function LoginScreen({ onSignIn }: { onSignIn: () => void }) {
+export default function LoginScreen({ onSignIn }: { onSignIn: (user: User) => void }) {
   const [signup, setSignup] = useState(false)
+  const [name, setName] = useState('')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [online, setOnline] = useState<boolean | null>(null)
 
-  function submit(e: FormEvent) {
+  useEffect(() => {
+    checkBackend().then(setOnline)
+  }, [])
+
+  async function submit(e: FormEvent) {
     e.preventDefault()
-    onSignIn()
+    setError('')
+    const user = username.trim()
+    if (!user || !password) {
+      setError('Enter a username and password.')
+      return
+    }
+    setBusy(true)
+    try {
+      onSignIn(signup ? await signUp(user, password, name.trim()) : await signIn(user, password))
+    } catch (err) {
+      setError((err as Error).message)
+      setBusy(false)
+    }
   }
 
   return (
@@ -26,27 +49,37 @@ export default function LoginScreen({ onSignIn }: { onSignIn: () => void }) {
           {signup && (
             <div className="field">
               <label htmlFor="name">Full name</label>
-              <input id="name" type="text" placeholder="Jordan Reyes" />
+              <input id="name" type="text" placeholder="Jordan Reyes" value={name} onChange={e => setName(e.target.value)} />
             </div>
           )}
           <div className="field">
             <label htmlFor="username">Username</label>
-            <input id="username" type="text" placeholder="jordanreyes" autoComplete="username" />
+            <input id="username" type="text" placeholder="jordanreyes" autoComplete="username" value={username} onChange={e => setUsername(e.target.value)} />
           </div>
           <div className="field">
             <label htmlFor="pass">Password</label>
-            <input id="pass" type="password" placeholder="Enter your password" autoComplete={signup ? 'new-password' : 'current-password'} />
+            <input id="pass" type="password" placeholder="Enter your password" autoComplete={signup ? 'new-password' : 'current-password'}
+              value={password} onChange={e => setPassword(e.target.value)} />
           </div>
-          <button type="submit" className="btn-primary">{signup ? 'Create account' : 'Sign in'}</button>
-          <div className="login-error"></div>
+          <button type="submit" className="btn-primary" disabled={busy}>
+            {busy ? (signup ? 'Creating account…' : 'Signing in…') : (signup ? 'Create account' : 'Sign in')}
+          </button>
+          <div className={error ? 'login-error show' : 'login-error'} role="alert">{error}</div>
         </form>
         <p className="login-foot">
           {signup ? 'Already have an account? ' : 'New to BackTrack? '}
-          <button type="button" className="link-btn" onClick={() => setSignup(!signup)}>
+          <button type="button" className="link-btn" onClick={() => { setSignup(!signup); setError('') }}>
             {signup ? 'Sign in instead' : 'Create an account'}
           </button>
         </p>
-        <div className="status-strip"><span className="dot-pulse"></span> <span>Checking backend connection&hellip;</span></div>
+        <div className="status-strip">
+          <span className={online === false ? 'dot-pulse offline' : 'dot-pulse'}></span>{' '}
+          <span>
+            {online == null ? <>Checking backend connection&hellip;</>
+              : online ? 'Backend connected — ready to sign in'
+              : "Couldn't reach the BackTrack backend at 127.0.0.1:5050"}
+          </span>
+        </div>
       </div>
     </div>
   )

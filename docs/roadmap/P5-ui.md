@@ -1,9 +1,9 @@
 # P5 UI on local data
 
-Replace `web/src/api.js` (from S02b) with calls to `storage/repo.js`, and subscribe to `core/tracker.js` through a `useTracker` hook. Remove the login screen (D2). Add a profile switcher only if more than one profile exists.
+Replace `web/src/api.ts` (from S02b) with calls to `storage/repo.ts`, and subscribe to `core/tracker.ts` through a `useTracker` hook. Remove the login screen (D2). Add a profile switcher only if more than one profile exists.
 
 ## S11 Record tab
-- Live canvases from `core/tracker.js` replace the MJPEG `<img>` feeds. Threshold bars, live readout, timer, Start/Stop → `repo.addSession`.
+- Live canvases from `core/tracker.ts` replace the MJPEG `<img>` feeds. Threshold bars, live readout, timer, Start/Stop → `repo.addSession`.
 - Give the Recalibrate buttons their own class (B1).
 - **Done when:** a recorded session appears in IndexedDB with the full shape.
 

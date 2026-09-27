@@ -13,9 +13,10 @@ type Props = {
   active: Tab
   onSelect: (tab: Tab) => void
   onSignOut: () => void
+  latestScore: number | null
 }
 
-export default function Sidebar({ active, onSelect, onSignOut }: Props) {
+export default function Sidebar({ active, onSelect, onSignOut, latestScore }: Props) {
   return (
     <aside className="sidebar">
       <div className="brand-mark">
@@ -46,7 +47,7 @@ export default function Sidebar({ active, onSelect, onSignOut }: Props) {
         <div className="session-mini">
           <div className="label">Latest session score</div>
           <div className="value">
-            <span>--</span>{' '}
+            <span>{latestScore ?? '--'}</span>{' '}
             <span style={{ fontSize: 12, color: 'var(--muted-fg)', fontWeight: 600, fontFamily: 'var(--font-body)' }}>out of 100</span>
           </div>
         </div>

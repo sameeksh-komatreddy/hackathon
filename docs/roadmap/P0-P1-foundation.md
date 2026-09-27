@@ -16,8 +16,8 @@
 
 ## S02b ⚙ Hook the React UI up to the Python backend
 - Port the event handlers and `fetch` calls from `frontend_pm.html` into the components, grepping the old file by section comment (`/* ==== … ==== */`). Keep state in `useState`/`useReducer`, with one context for the signed-in user and settings. No state library.
-- Put every backend call in `web/src/api.js`, so P5 can swap it for `storage/repo.js` in one place.
-- The Python backend must accept the Vite dev origin: add `http://localhost:5173` to `LOCAL_ORIGIN`.
+- Put every backend call in `web/src/api.ts`, so P5 can swap it for `storage/repo.ts` in one place.
+- The Python backend must accept the Vite dev origin. (Already true: `LOCAL_ORIGIN` allows any localhost port.)
 - **Done when:** `npm run dev` does everything the old page did against the Python backend.
 
 ## S03 ★ CI and deploy

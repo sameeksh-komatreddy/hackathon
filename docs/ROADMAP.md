@@ -33,7 +33,7 @@ Keeping each session within a Pro plan usage window:
 **[P0–P1 Cleanup and foundation](roadmap/P0-P1-foundation.md)**
 - [x] S01 Repo cleanup: archive old iterations, fix the README
 - [x] S02a ★ React scaffold and static layout
-- [ ] S02b ⚙ Hook the React UI up to the Python backend
+- [x] S02b ⚙ Hook the React UI up to the Python backend
 - [ ] S03 ★ CI (tests and build) and Cloudflare Pages deploy
 
 **[P2 Feasibility check](roadmap/P2-spike.md)** (go/no-go gate)
@@ -83,6 +83,8 @@ Keeping each session within a Pro plan usage window:
 ## Progress log
 
 _(newest first; keep 10)_
+
+- 2026-09-27 S02b: React UI wired to the Python backend through web/src/api.ts; checked live end to end (backend in a .venv, Python 3.12). Fixed while porting: AI Refresh no longer recalibrates the side camera, sign-out stops a running session, reload resumes a running session, threshold hint stays 4 s, export dates use local time, late alert no longer hides the "Session saved" toast
 
 - 2026-09-27 S02a: web/ Vite + React + TypeScript app, CSS copied as is, login + 4 tabs as components, Vitest render tests; login kept until local profiles replace it
 

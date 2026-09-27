@@ -2,11 +2,11 @@
 
 ## S09 Schema and data layer
 - Use Dexie (`npm i dexie`) for IndexedDB; test with `fake-indexeddb`.
-- Schema v1, in `storage/db.js`:
+- Schema v1, in `storage/db.ts`:
   - `profiles`: `id`, `name`, `createdAt`. Optional; one profile is created automatically on first run.
   - `sessions`: same fields as the Python `session_record`, plus `profileId` and `schemaVersion`. Index on `[profileId+startTime]`.
   - `settings`: `profileId`, then the threshold values, quiet hours and theme.
-- `storage/repo.js`: the only module the UI talks to (listSessions, addSession, getSettings, saveSettings, deleteProfileData).
+- `storage/repo.ts`: the only module the UI talks to (listSessions, addSession, getSettings, saveSettings, deleteProfileData).
 - ★ Write down the migration rule: bump the Dexie version and add an upgrade function whenever the schema changes.
 - **Done when:** the data layer tests pass.
 

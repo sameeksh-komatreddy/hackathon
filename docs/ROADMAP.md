@@ -18,7 +18,7 @@ Keeping each session within a Pro plan usage window:
 
 | # | Decision | Status |
 |---|----------|--------|
-| D1 | No app server. Static site on Cloudflare Pages (free, works with private repos; GitHub Pages needs a public repo) | Agreed |
+| D1 | No app server. Static site as a Cloudflare Worker with static assets (free and unlimited asset requests, works with private repos). Chosen over Pages, which Cloudflare now labels legacy | Agreed |
 | D2 | All data local in IndexedDB. No accounts or passwords; optional local profiles | Agreed |
 | D3 | Premade insight library replaces Gemini ([P6](roadmap/P6-insights.md)) | Agreed |
 | D4 | Vite + React + TypeScript for the UI. `core/` and `storage/` stay plain modules with no React imports | Agreed |
@@ -34,7 +34,7 @@ Keeping each session within a Pro plan usage window:
 - [x] S01 Repo cleanup: archive old iterations, fix the README
 - [x] S02a ★ React scaffold and static layout
 - [x] S02b ⚙ Hook the React UI up to the Python backend
-- [ ] S03 ★ CI (tests and build) and Cloudflare Pages deploy
+- [ ] S03 ★ CI (tests and build) and Cloudflare Workers deploy
 
 **[P2 Feasibility check](roadmap/P2-spike.md)** (go/no-go gate)
 - [ ] S04 ★ MediaPipe in the browser: frame rate, background-tab behaviour, Safari/Firefox

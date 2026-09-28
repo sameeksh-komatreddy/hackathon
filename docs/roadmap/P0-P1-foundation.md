@@ -22,5 +22,6 @@
 
 ## S03 ★ CI and deploy
 - GitHub Actions workflow: run `pytest` (until S23) and `npm ci && npm test && npm run build` in `web/`.
-- Connect the repo to Cloudflare Pages: build `npm run build`, root `web`, output `dist`. Every branch gets a preview URL. Free subdomain `*.pages.dev`; a custom domain is optional and costs money.
+- Deploy as a Cloudflare Worker with static assets (D1): `web/wrangler.jsonc` points at `dist` with SPA fallback and `preview_urls`. Workers Builds settings: root `web`, build `npm run build`, deploy `npx wrangler deploy`. Every branch gets a preview URL. Free subdomain `backtrack.<account>.workers.dev`; a custom domain is optional and costs money.
+- The S17 signalling Worker stays a separate Worker: preview URLs aren't generated for Workers that contain a Durable Object.
 - **Done when:** a push to `main` deploys, and a pull request gets a preview link.

@@ -37,11 +37,11 @@ Keeping each session within a Pro plan usage window:
 - [ ] S03 ★ CI (tests and build) and Cloudflare Workers deploy. **Paused:** CI and `web/wrangler.jsonc` are done. Waiting for Sameeksh to move the repo into a GitHub organization with anshulfs as owner (a collaborator can't connect a personal repo to Cloudflare). Then: update the git remote, connect Workers Builds (settings in the phase file), and check a PR preview link. S04 goes first meanwhile.
 
 **[P2 Feasibility check](roadmap/P2-spike.md)** (go/no-go gate)
-- [ ] S04 ★ MediaPipe in the browser: frame rate, background-tab behaviour, Safari/Firefox
+- [ ] S04 ★ MediaPipe in the browser: frame rate, background-tab behaviour, Safari/Firefox. **Partly done, circle back:** Chrome and Edge pass the gate (about 30 fps in a hidden tab with a timer loop). Firefox, Safari, the slowest laptop and real webcams are still to test with `web/spike.html` (steps in the phase file). Finish this before S06; S05 doesn't depend on it
 
 **[P3 Detection port](roadmap/P3-detection.md)**
 - [ ] S05 ⚙ Port the scoring and metric math, with tests
-- [ ] S06 Tracking loops for the front and side cameras
+- [ ] S06 Tracking loops for the front and side cameras. **Blocked until S04 is finished**
 - [ ] S07 ★ Guided calibration and browser camera picker
 - [ ] S08 Alert engine that only runs while recording, plus quiet hours
 
@@ -84,6 +84,7 @@ Keeping each session within a Pro plan usage window:
 
 _(newest first; keep 10)_
 
+- 2026-10-03 S04 (partial): spike page built; Chrome/Edge keep tracking at ~30 fps in hidden or minimized tabs using a timer loop (rAF and rVFC stop); worker loop needs backpressure; Firefox/Safari/slow laptop pending
 - 2026-10-03 S03 (paused): CI workflow passing (pytest + web test/build); deploy target switched from Pages to Workers (D1); Cloudflare connect blocked until the repo moves to an org; doing S04 first
 
 - 2026-09-27 S02b: React UI wired to the Python backend through web/src/api.ts; checked live end to end (backend in a .venv, Python 3.12). Fixed while porting: AI Refresh no longer recalibrates the side camera, sign-out stops a running session, reload resumes a running session, threshold hint stays 4 s, export dates use local time, late alert no longer hides the "Session saved" toast

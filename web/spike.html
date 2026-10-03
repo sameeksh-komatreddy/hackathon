@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>S04 MediaPipe spike</title>
+    <style>
+      body { font: 14px/1.4 system-ui, sans-serif; margin: 16px; background: #fafafa; color: #222; }
+      fieldset { margin: 0 0 12px; border: 1px solid #ccc; }
+      label { margin-right: 12px; }
+      .cams { display: flex; flex-wrap: wrap; gap: 12px; }
+      .cam { position: relative; }
+      .cam video { display: none; }
+      .cam canvas { width: 480px; max-width: 100%; background: #000; }
+      .stats { font: 13px ui-monospace, monospace; white-space: pre; }
+      #log { font: 12px ui-monospace, monospace; white-space: pre-wrap; background: #fff; border: 1px solid #ccc; padding: 8px; max-height: 320px; overflow: auto; }
+      button { margin-right: 8px; }
+    </style>
+  </head>
+  <body>
+    <h1>S04 MediaPipe spike</h1>
+    <p>Pick settings, press Start, wait ~10 s for a steady rate, then switch to another tab for 2 minutes and come back. The hidden-period summary is logged below. "Copy results" puts everything on the clipboard.</p>
+
+    <fieldset>
+      <legend>Settings (applied on Start)</legend>
+      <label>Delegate <select id="delegate"><option>GPU</option><option>CPU</option></select></label>
+      <label>Loop
+        <select id="loop">
+          <option value="raf">requestAnimationFrame</option>
+          <option value="rvfc">requestVideoFrameCallback</option>
+          <option value="interval">setInterval 33 ms</option>
+          <option value="worker">Worker timer 33 ms</option>
+        </select>
+      </label>
+      <br />
+      <label>Front camera (face + pose) <select id="cam1"></select></label>
+      <label>Side camera (pose only) <select id="cam2"></select></label>
+    </fieldset>
+
+    <button id="start">Start</button>
+    <button id="stop" disabled>Stop</button>
+    <button id="copy">Copy results</button>
+    <span id="status"></span>
+
+    <div class="cams">
+      <div class="cam"><video id="v1" playsinline muted></video><canvas id="c1"></canvas><div class="stats" id="s1"></div></div>
+      <div class="cam"><video id="v2" playsinline muted></video><canvas id="c2"></canvas><div class="stats" id="s2"></div></div>
+    </div>
+
+    <h2>Log</h2>
+    <div id="log"></div>
+
+    <script type="module">
+      import {
+        FilesetResolver, FaceLandmarker, PoseLandmarker, DrawingUtils,
+      } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/vision_bundle.mjs'
+
+      const WASM = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm'
+      const FACE_MODEL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task'
+      const POSE_MODEL = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task'
+
+      const $ = (id) => document.getElementById(id)
+      const results = { userAgent: navigator.userAgent, runs: [] }
+      let run = null
+      let vision = null
+
+      function log(msg) {
+        const line = `[${new Date().toLocaleTimeString()}] ${msg}`
+        $('log').textContent += line + '\n'
+        $('log').scrollTop = $('log').scrollHeight
+        if (run) run.log.push(line)
+      }
+
+      async function listCameras() {
+        // Labels only show once permission has been granted.
+        const tmp = await navigator.mediaDevices.getUserMedia({ video: true })
+        tmp.getTracks().forEach((t) => t.stop())
+        const devices = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput')
+        for (const [sel, allowNone] of [[$('cam1'), false], [$('cam2'), true]]) {
+          sel.innerHTML = allowNone ? '<option value="">(none)</option>' : ''
+          for (const d of devices) sel.add(new Option(d.label || d.deviceId.slice(0, 8), d.deviceId))
+        }
+        log(`${devices.length} camera(s) found`)
+      }
+
+      async function openCamera(deviceId, video) {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { deviceId: { exact: deviceId }, width: 640, height: 480 },
+        })
+        video.srcObject = stream
+        await video.play()
+        return stream
+      }
+
+      function makeSlot(n, video, canvas, statsEl, withFace) {
+        return { n, video, canvas, ctx: canvas.getContext('2d'), statsEl, withFace,
+          face: null, pose: null, lastTs: -1, frames: [], faceMs: [], poseMs: [], stream: null }
+      }
+
+      function processSlot(slot) {
+        const { video } = slot
+        if (video.readyState < 2) return
+        let ts = performance.now()
+        if (ts <= slot.lastTs) ts = slot.lastTs + 0.001
+        slot.lastTs = ts
+
+        let faceRes = null
+        if (slot.face) {
+          const t0 = performance.now()
+          faceRes = slot.face.detectForVideo(video, ts)
+          slot.faceMs.push(performance.now() - t0)
+        }
+        const t1 = performance.now()
+        const poseRes = slot.pose.detectForVideo(video, ts)
+        slot.poseMs.push(performance.now() - t1)
+        slot.frames.push({ t: ts, hidden: document.hidden })
+
+        // Skip drawing while hidden; nobody sees it and it would skew timing.
+        if (document.hidden) return
+        const { canvas, ctx } = slot
+        if (canvas.width !== video.videoWidth) { canvas.width = video.videoWidth; canvas.height = video.videoHeight }
+        ctx.drawImage(video, 0, 0)
+        const du = new DrawingUtils(ctx)
+        for (const lm of faceRes?.faceLandmarks ?? []) du.drawLandmarks(lm, { radius: 0.6, color: '#0f0', lineWidth: 0 })
+        for (const lm of poseRes.landmarks ?? []) {
+          du.drawConnectors(lm, PoseLandmarker.POSE_CONNECTIONS, { color: '#0af', lineWidth: 2 })
+          du.drawLandmarks(lm, { radius: 2, color: '#f50' })
+        }
+      }
+
+      const avg = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0)
+      const last = (a, n) => a.slice(-n)
+
+      function showStats() {
+        if (!run) return
+        const now = performance.now()
+        for (const slot of run.slots) {
+          const fps = slot.frames.filter((f) => f.t > now - 1000).length
+          if (!document.hidden && now - run.startedAt > 3000) (slot.visibleSamples ??= []).push(fps)
+          slot.statsEl.textContent =
+            `cam ${slot.n}: ${fps} fps\n` +
+            (slot.face ? `face ${avg(last(slot.faceMs, 30)).toFixed(1)} ms  ` : '') +
+            `pose ${avg(last(slot.poseMs, 30)).toFixed(1)} ms`
+        }
+      }
+
+      // Per-second frame counts over [from, to], built from frame timestamps so
+      // it is accurate even when our own timers were throttled.
+      function bucketFps(slot, from, to) {
+        const secs = Math.floor((to - from) / 1000)
+        const counts = new Array(Math.max(secs, 0)).fill(0)
+        for (const f of slot.frames) {
+          const i = Math.floor((f.t - from) / 1000)
+          if (i >= 0 && i < secs) counts[i]++
+        }
+        return counts
+      }
+
+      function summarizeHidden(from, to) {
+        const durS = ((to - from) / 1000).toFixed(1)
+        for (const slot of run.slots) {
+          const counts = bucketFps(slot, from, to)
+          const steady = counts.slice(1) // first second straddles the switch
+          const total = counts.reduce((a, b) => a + b, 0)
+          const gaps = []
+          const hiddenFrames = slot.frames.filter((f) => f.t >= from && f.t <= to)
+          for (let i = 1; i < hiddenFrames.length; i++) gaps.push(hiddenFrames[i].t - hiddenFrames[i - 1].t)
+          const summary = {
+            cam: slot.n, hiddenSeconds: Number(durS), frames: total,
+            avgFps: Number((total / ((to - from) / 1000)).toFixed(2)),
+            minFps: steady.length ? Math.min(...steady) : 0,
+            maxGapMs: gaps.length ? Math.round(Math.max(...gaps)) : null,
+            perSecond: counts,
+          }
+          run.hidden.push(summary)
+          log(`HIDDEN ${durS}s cam ${slot.n}: avg ${summary.avgFps} fps, min ${summary.minFps} fps, max gap ${summary.maxGapMs} ms`)
+        }
+      }
+
+      function startLoop(kind, tick) {
+        if (kind === 'raf') {
+          const f = () => { if (!run) return; tick(); run.rafId = requestAnimationFrame(f) }
+          run.rafId = requestAnimationFrame(f)
+        } else if (kind === 'rvfc') {
+          const v = run.slots[0].video
+          if (!('requestVideoFrameCallback' in v)) { log('requestVideoFrameCallback not supported here'); return false }
+          const f = () => { if (!run) return; tick(); v.requestVideoFrameCallback(f) }
+          v.requestVideoFrameCallback(f)
+        } else if (kind === 'interval') {
+          run.intervalId = setInterval(tick, 33)
+        } else if (kind === 'worker') {
+          // The worker waits for an ack before the next tick, so slow frames
+          // can't pile up a queue of messages and starve the page.
+          const src = `let last = 0
+            const go = () => { last = performance.now(); postMessage(0) }
+            onmessage = () => setTimeout(go, Math.max(0, 33 - (performance.now() - last)))
+            go()`
+          run.worker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })))
+          run.worker.onmessage = () => { tick(); run?.worker.postMessage(0) }
+        }
+        return true
+      }
+
+      async function start() {
+        $('start').disabled = true
+        $('status').textContent = 'loading models...'
+        const delegate = $('delegate').value
+        const loop = $('loop').value
+        run = { delegate, loop, slots: [], hidden: [], log: [], hiddenSince: null }
+        try {
+          vision ??= await FilesetResolver.forVisionTasks(WASM)
+          const slotDefs = [[$('cam1').value, $('v1'), $('c1'), $('s1'), true]]
+          if ($('cam2').value) slotDefs.push([$('cam2').value, $('v2'), $('c2'), $('s2'), false])
+          for (const [i, [deviceId, video, canvas, statsEl, withFace]] of slotDefs.entries()) {
+            const slot = makeSlot(i + 1, video, canvas, statsEl, withFace)
+            slot.stream = await openCamera(deviceId, video)
+            const t0 = performance.now()
+            if (withFace) {
+              slot.face = await FaceLandmarker.createFromOptions(vision, {
+                baseOptions: { modelAssetPath: FACE_MODEL, delegate },
+                runningMode: 'VIDEO', numFaces: 1, outputFacialTransformationMatrixes: true,
+              })
+            }
+            slot.pose = await PoseLandmarker.createFromOptions(vision, {
+              baseOptions: { modelAssetPath: POSE_MODEL, delegate },
+              runningMode: 'VIDEO', numPoses: 1,
+            })
+            log(`cam ${slot.n} ready (${slot.video.videoWidth}x${slot.video.videoHeight}), models loaded in ${Math.round(performance.now() - t0)} ms`)
+            run.slots.push(slot)
+          }
+        } catch (e) {
+          log('start failed: ' + (e?.message ?? e))
+          await stop()
+          return
+        }
+        const tick = () => { for (const s of run.slots) processSlot(s) }
+        if (!startLoop(loop, tick)) { await stop(); return }
+        run.startedAt = performance.now()
+        run.statsId = setInterval(showStats, 500)
+        $('stop').disabled = false
+        $('status').textContent = `running: ${delegate}, ${loop}, ${run.slots.length} camera(s)`
+        log(`started ${delegate} / ${loop}`)
+      }
+
+      async function stop() {
+        if (!run) return
+        const r = run
+        if (r.hiddenSince !== null) summarizeHidden(r.hiddenSince, performance.now())
+        if (r.startedAt) {
+          const dur = (performance.now() - r.startedAt) / 1000
+          r.visibleFps = r.slots.map((s) => {
+            return {
+              cam: s.n, frames: s.frames.length, seconds: Number(dur.toFixed(1)),
+              visibleAvgFps: Number(avg(s.visibleSamples ?? []).toFixed(1)),
+              faceMs: Number(avg(s.faceMs).toFixed(1)), poseMs: Number(avg(s.poseMs).toFixed(1)),
+            }
+          })
+          log('summary ' + JSON.stringify(r.visibleFps))
+        }
+        run = null
+        cancelAnimationFrame(r.rafId); clearInterval(r.intervalId); clearInterval(r.statsId); r.worker?.terminate()
+        for (const s of r.slots) { s.face?.close(); s.pose?.close(); s.stream?.getTracks().forEach((t) => t.stop()) }
+        results.runs.push({ delegate: r.delegate, loop: r.loop, cameras: r.slots.length, visible: r.visibleFps, hidden: r.hidden, log: r.log })
+        $('start').disabled = false
+        $('stop').disabled = true
+        $('status').textContent = 'stopped'
+      }
+
+      document.addEventListener('visibilitychange', () => {
+        if (!run) return
+        if (document.hidden) {
+          run.hiddenSince = performance.now()
+          log('tab hidden')
+        } else if (run.hiddenSince !== null) {
+          log('tab visible')
+          summarizeHidden(run.hiddenSince, performance.now())
+          run.hiddenSince = null
+        }
+      })
+
+      $('start').onclick = start
+      $('stop').onclick = stop
+      $('copy').onclick = async () => {
+        const text = JSON.stringify(results, null, 2)
+        try { await navigator.clipboard.writeText(text); log('results copied') }
+        catch { $('log').textContent += '\n' + text }
+      }
+
+      listCameras().catch((e) => log('camera access failed: ' + e.message))
+    </script>
+  </body>
+</html>

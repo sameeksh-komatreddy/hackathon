@@ -34,7 +34,7 @@ Keeping each session within a Pro plan usage window:
 - [x] S01 Repo cleanup: archive old iterations, fix the README
 - [x] S02a ★ React scaffold and static layout
 - [x] S02b ⚙ Hook the React UI up to the Python backend
-- [ ] S03 ★ CI (tests and build) and Cloudflare Workers deploy
+- [ ] S03 ★ CI (tests and build) and Cloudflare Workers deploy. **Paused:** CI and `web/wrangler.jsonc` are done. Waiting for Sameeksh to move the repo into a GitHub organization with anshulfs as owner (a collaborator can't connect a personal repo to Cloudflare). Then: update the git remote, connect Workers Builds (settings in the phase file), and check a PR preview link. S04 goes first meanwhile.
 
 **[P2 Feasibility check](roadmap/P2-spike.md)** (go/no-go gate)
 - [ ] S04 ★ MediaPipe in the browser: frame rate, background-tab behaviour, Safari/Firefox
@@ -83,6 +83,8 @@ Keeping each session within a Pro plan usage window:
 ## Progress log
 
 _(newest first; keep 10)_
+
+- 2026-10-03 S03 (paused): CI workflow passing (pytest + web test/build); deploy target switched from Pages to Workers (D1); Cloudflare connect blocked until the repo moves to an org; doing S04 first
 
 - 2026-09-27 S02b: React UI wired to the Python backend through web/src/api.ts; checked live end to end (backend in a .venv, Python 3.12). Fixed while porting: AI Refresh no longer recalibrates the side camera, sign-out stops a running session, reload resumes a running session, threshold hint stays 4 s, export dates use local time, late alert no longer hides the "Session saved" toast
 
